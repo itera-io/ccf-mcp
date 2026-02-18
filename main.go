@@ -256,9 +256,10 @@ type WaitForProjectArgs struct {
 }
 
 type WaitForAppArgs struct {
-	ProjectAppId int32 `json:"projectAppId" jsonschema:"required,description=The ID of the project application to wait for"`
-	Timeout      int32 `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds (default: 60 for creation, 30 for deletion)"`
-	WaitDeleted  bool  `json:"waitDeleted,omitempty" jsonschema:"description=Wait for the application to be deleted (default: false)"`
+	ProjectAppId               int32 `json:"projectAppId" jsonschema:"required,description=The ID of the project application to wait for"`
+	Timeout                    int32 `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds (default: 60 for creation, 30 for deletion)"`
+	WaitDeleted                bool  `json:"waitDeleted,omitempty" jsonschema:"description=Wait for the application to be deleted (default: false)"`
+	ReadyStabilizationSeconds  int32 `json:"readyStabilizationSeconds,omitempty" jsonschema:"description=Seconds the app must remain in Ready state before success (default: 30)"`
 }
 
 type DeleteServersArgs struct {

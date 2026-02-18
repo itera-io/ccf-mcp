@@ -1,4 +1,4 @@
-module github.com/itera-io/taikun-mcp
+module github.com/skotnicky/cloudera-cloud-factory-mcp
 
 go 1.25.0
 
