@@ -1,0 +1,374 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"slices"
+	"sort"
+	"strings"
+	"sync"
+
+	"github.com/itera-io/taikungoclient"
+	taikuncore "github.com/itera-io/taikungoclient/client"
+	mcp_golang "github.com/metoro-io/mcp-golang"
+	"github.com/tidwall/gjson"
+)
+
+type RobotUserCapabilitiesArgs struct{}
+
+type RobotUserContext struct {
+	UserID              string   `json:"userId,omitempty"`
+	AccountID           int32    `json:"accountId,omitempty"`
+	AccountName         string   `json:"accountName,omitempty"`
+	AccessKey           string   `json:"accessKey,omitempty"`
+	OrganizationID      int32    `json:"organizationId,omitempty"`
+	OrganizationName    string   `json:"organizationName,omitempty"`
+	CreatedBy           string   `json:"createdBy,omitempty"`
+	Name                string   `json:"name,omitempty"`
+	Description         string   `json:"description,omitempty"`
+	Scopes              []string `json:"scopes"`
+	IsActive            bool     `json:"isActive"`
+	CreatedAt           string   `json:"createdAt,omitempty"`
+	ExpiresAt           string   `json:"expiresAt,omitempty"`
+	LastUsedAt          string   `json:"lastUsedAt,omitempty"`
+	ScopeDiscoveryError string   `json:"scopeDiscoveryError,omitempty"`
+}
+
+type ToolScopeAccess struct {
+	Tool           string   `json:"tool"`
+	Status         string   `json:"status"`
+	RequiredScopes []string `json:"requiredScopes,omitempty"`
+	MissingScopes  []string `json:"missingScopes,omitempty"`
+	Reason         string   `json:"reason,omitempty"`
+}
+
+type RobotUserCapabilitiesResponse struct {
+	RobotUser  RobotUserContext  `json:"robotUser"`
+	ToolAccess []ToolScopeAccess `json:"toolAccess"`
+	Success    bool              `json:"success"`
+	Message    string            `json:"message"`
+}
+
+var (
+	robotUserContextMu sync.RWMutex
+	robotUserContext   RobotUserContext
+)
+
+var toolRequiredScopes = map[string][]string{
+	"refresh-taikun-client":        {},
+	"robot-user-capabilities":      {},
+	"create-virtual-cluster":       {"scope:virtual-clusters:write"},
+	"delete-virtual-cluster":       {"scope:virtual-clusters:write"},
+	"list-virtual-clusters":        {"scope:virtual-clusters:read"},
+	"catalog-create":               {"scope:applications:write"},
+	"catalog-list":                 {"scope:applications:read"},
+	"catalog-delete":               {"scope:applications:write"},
+	"available-apps-list":          {"scope:applications:read"},
+	"catalog-app-add":              {"scope:applications:write"},
+	"catalog-apps-list":            {"scope:applications:read"},
+	"catalog-app-params":           {"scope:applications:read"},
+	"catalog-app-defaults-set":     {"scope:applications:write"},
+	"app-install":                  {"scope:applications:write"},
+	"list-apps":                    {"scope:applications:read"},
+	"get-app":                      {"scope:applications:read"},
+	"update-sync-app":              {"scope:applications:write"},
+	"uninstall-app":                {"scope:applications:write"},
+	"wait-for-app":                 {"scope:applications:read"},
+	"list-projects":                {"scope:projects:read"},
+	"create-project":               {"scope:projects:write"},
+	"delete-project":               {"scope:projects:write"},
+	"wait-for-project":             {"scope:projects:read"},
+	"deploy-kubernetes-resources":  {"scope:kubernetes:write"},
+	"create-kubeconfig":            {"scope:kubernetes:read"},
+	"get-kubeconfig":               {"scope:kubernetes:read"},
+	"list-kubeconfig-roles":        {"scope:kubernetes:read"},
+	"list-kubernetes-resources":    {"scope:kubernetes:read"},
+	"describe-kubernetes-resource": {"scope:kubernetes:read"},
+	"delete-kubernetes-resource":   {"scope:kubernetes:write"},
+	"patch-kubernetes-resource":    {"scope:kubernetes:write"},
+	"list-cloud-credentials":       {"scope:cloud-credentials:read"},
+	"bind-flavors-to-project":      {"scope:flavors:write"},
+	"add-server-to-project":        {"scope:servers:write"},
+	"commit-project":               {"scope:project-deployments"},
+	"get-project-details":          {"scope:projects:read"},
+	"list-flavors":                 {"scope:flavors:read"},
+	"list-servers":                 {"scope:servers:read"},
+	"delete-servers-from-project":  {"scope:servers:write"},
+}
+
+func setRobotUserContext(ctx RobotUserContext) {
+	robotUserContextMu.Lock()
+	defer robotUserContextMu.Unlock()
+	robotUserContext = ctx
+}
+
+func getRobotUserContext() RobotUserContext {
+	robotUserContextMu.RLock()
+	defer robotUserContextMu.RUnlock()
+	ctx := robotUserContext
+	ctx.Scopes = append([]string(nil), robotUserContext.Scopes...)
+	return ctx
+}
+
+func parseRobotUserContext(body []byte) (RobotUserContext, error) {
+	if len(body) == 0 {
+		return RobotUserContext{}, fmt.Errorf("robot details response body was empty")
+	}
+
+	ctx := RobotUserContext{
+		UserID:           gjson.GetBytes(body, "userId").String(),
+		AccountID:        int32(gjson.GetBytes(body, "accountId").Int()),
+		AccountName:      gjson.GetBytes(body, "accountName").String(),
+		AccessKey:        gjson.GetBytes(body, "accessKey").String(),
+		OrganizationID:   int32(gjson.GetBytes(body, "organizationId").Int()),
+		OrganizationName: gjson.GetBytes(body, "organizationName").String(),
+		CreatedBy:        gjson.GetBytes(body, "createdBy").String(),
+		Name:             gjson.GetBytes(body, "name").String(),
+		Description:      gjson.GetBytes(body, "description").String(),
+		IsActive:         gjson.GetBytes(body, "isActive").Bool(),
+		CreatedAt:        gjson.GetBytes(body, "createdAt").String(),
+		ExpiresAt:        gjson.GetBytes(body, "expiresAt").String(),
+		LastUsedAt:       gjson.GetBytes(body, "lastUsedAt").String(),
+	}
+
+	scopes := gjson.GetBytes(body, "scopes")
+	for _, scope := range scopes.Array() {
+		if scope.Str != "" {
+			ctx.Scopes = append(ctx.Scopes, scope.Str)
+		}
+	}
+	sort.Strings(ctx.Scopes)
+
+	if ctx.AccessKey == "" && ctx.Name == "" {
+		return RobotUserContext{}, fmt.Errorf("robot details response did not contain robot user metadata")
+	}
+
+	return ctx, nil
+}
+
+func fetchRobotUserContext(client *taikungoclient.Client) (RobotUserContext, error) {
+	ctx := context.Background()
+	details, httpResponse, err := client.Client.RobotAPI.RobotDetails(ctx).Execute()
+
+	if httpResponse != nil && httpResponse.Body != nil {
+		body, readErr := io.ReadAll(httpResponse.Body)
+		if readErr == nil {
+			parsedCtx, parseErr := parseRobotUserContext(body)
+			if parseErr == nil {
+				return parsedCtx, nil
+			}
+		}
+	}
+
+	if err != nil {
+		return RobotUserContext{}, taikungoclient.CreateError(httpResponse, err)
+	}
+	if details == nil {
+		return RobotUserContext{}, fmt.Errorf("robot details response was empty")
+	}
+
+	parsed := robotUserContextFromDetails(details)
+	sort.Strings(parsed.Scopes)
+	return parsed, nil
+}
+
+func robotUserContextFromDetails(details *taikuncore.RobotUsersListDto) RobotUserContext {
+	parsed := RobotUserContext{
+		UserID:           details.GetUserId(),
+		AccountID:        details.GetDomainId(),
+		AccountName:      details.GetDomainName(),
+		AccessKey:        details.GetAccessKey(),
+		OrganizationID:   details.GetOrganizationId(),
+		OrganizationName: details.GetOrganizationName(),
+		CreatedBy:        details.GetCreatedBy(),
+		Name:             details.GetName(),
+		Description:      details.GetDescription(),
+		Scopes:           append([]string(nil), details.GetScopes()...),
+		IsActive:         details.GetIsActive(),
+		CreatedAt:        details.GetCreatedAt(),
+		ExpiresAt:        details.GetExpiresAt(),
+		LastUsedAt:       details.GetLastUsedAt(),
+	}
+
+	if value, ok := details.AdditionalProperties["accountId"]; ok {
+		if accountID, ok := int32FromAny(value); ok {
+			parsed.AccountID = accountID
+		}
+	}
+	if value, ok := details.AdditionalProperties["accountName"]; ok {
+		if accountName, ok := stringFromAny(value); ok {
+			parsed.AccountName = accountName
+		}
+	}
+
+	return parsed
+}
+
+func int32FromAny(value interface{}) (int32, bool) {
+	switch typed := value.(type) {
+	case int:
+		return int32(typed), true
+	case int32:
+		return typed, true
+	case int64:
+		return int32(typed), true
+	case float64:
+		return int32(typed), true
+	case float32:
+		return int32(typed), true
+	default:
+		return 0, false
+	}
+}
+
+func stringFromAny(value interface{}) (string, bool) {
+	typed, ok := value.(string)
+	return typed, ok
+}
+
+func refreshRobotUserContext() RobotUserContext {
+	ctx, err := fetchRobotUserContext(taikunClient)
+	if err != nil {
+		logger.Printf("Unable to refresh Robot User scopes: %v", err)
+		setRobotUserContext(RobotUserContext{
+			ScopeDiscoveryError: err.Error(),
+		})
+		return getRobotUserContext()
+	}
+
+	logger.Printf("Loaded Robot User scopes for %q (%d scope(s))", ctx.Name, len(ctx.Scopes))
+	setRobotUserContext(ctx)
+	return ctx
+}
+
+func evaluateToolScopeAccess(toolName string, assignedScopes []string) ToolScopeAccess {
+	requiredScopes, ok := toolRequiredScopes[toolName]
+	if !ok {
+		return ToolScopeAccess{
+			Tool:   toolName,
+			Status: "unknown",
+			Reason: "No scope mapping is defined for this tool yet",
+		}
+	}
+
+	if len(requiredScopes) == 0 {
+		return ToolScopeAccess{
+			Tool:           toolName,
+			Status:         "allowed",
+			RequiredScopes: []string{},
+			Reason:         "This tool does not require any Robot User scopes",
+		}
+	}
+
+	missing := make([]string, 0, len(requiredScopes))
+	for _, required := range requiredScopes {
+		if !slices.Contains(assignedScopes, required) {
+			missing = append(missing, required)
+		}
+	}
+
+	if len(missing) == 0 {
+		return ToolScopeAccess{
+			Tool:           toolName,
+			Status:         "allowed",
+			RequiredScopes: append([]string(nil), requiredScopes...),
+		}
+	}
+
+	return ToolScopeAccess{
+		Tool:           toolName,
+		Status:         "blocked",
+		RequiredScopes: append([]string(nil), requiredScopes...),
+		MissingScopes:  missing,
+		Reason:         "Robot User is missing required scopes for this tool",
+	}
+}
+
+func currentRobotUserCapabilities() RobotUserCapabilitiesResponse {
+	ctx := getRobotUserContext()
+
+	toolNames := make([]string, 0, len(toolRequiredScopes))
+	for toolName := range toolRequiredScopes {
+		toolNames = append(toolNames, toolName)
+	}
+	sort.Strings(toolNames)
+
+	toolAccess := make([]ToolScopeAccess, 0, len(toolNames))
+	for _, toolName := range toolNames {
+		toolAccess = append(toolAccess, evaluateToolScopeAccess(toolName, ctx.Scopes))
+	}
+
+	message := fmt.Sprintf("Loaded Robot User capabilities for %d scoped tool(s)", len(toolAccess))
+	if ctx.ScopeDiscoveryError != "" {
+		message = "Robot User scope discovery failed"
+	}
+
+	return RobotUserCapabilitiesResponse{
+		RobotUser:  ctx,
+		ToolAccess: toolAccess,
+		Success:    ctx.ScopeDiscoveryError == "",
+		Message:    message,
+	}
+}
+
+func getRobotUserCapabilities() *mcp_golang.ToolResponse {
+	return createJSONResponse(currentRobotUserCapabilities())
+}
+
+func scopeDeniedResponse(toolName string, access ToolScopeAccess) *mcp_golang.ToolResponse {
+	details := fmt.Sprintf("Required scopes: %s. Missing scopes: %s.",
+		strings.Join(access.RequiredScopes, ", "),
+		strings.Join(access.MissingScopes, ", "),
+	)
+
+	ctx := getRobotUserContext()
+	if len(ctx.Scopes) > 0 {
+		details += fmt.Sprintf(" Assigned scopes: %s.", strings.Join(ctx.Scopes, ", "))
+	}
+	if ctx.ScopeDiscoveryError != "" {
+		details += fmt.Sprintf(" Scope discovery warning: %s.", ctx.ScopeDiscoveryError)
+	}
+
+	return createJSONResponse(ErrorResponse{
+		Error:   fmt.Sprintf("Robot User cannot use tool %q", toolName),
+		Details: details,
+	})
+}
+
+func authorizeTool(toolName string) *mcp_golang.ToolResponse {
+	ctx := getRobotUserContext()
+	access := evaluateToolScopeAccess(toolName, ctx.Scopes)
+	if access.Status == "unknown" {
+		return createJSONResponse(ErrorResponse{
+			Error:   fmt.Sprintf("Robot User authorization is not configured for tool %q", toolName),
+			Details: "This tool is registered for scope-aware authorization, but no scope mapping is defined for it.",
+		})
+	}
+	if ctx.ScopeDiscoveryError != "" {
+		if len(access.RequiredScopes) == 0 {
+			return nil
+		}
+		return createJSONResponse(ErrorResponse{
+			Error:   fmt.Sprintf("Cannot authorize tool %q because Robot User scope discovery failed", toolName),
+			Details: ctx.ScopeDiscoveryError,
+		})
+	}
+	if access.Status == "blocked" {
+		return scopeDeniedResponse(toolName, access)
+	}
+	return nil
+}
+
+func registerScopedTool[T any](server *mcp_golang.Server, name, description string, handler func(args T) (*mcp_golang.ToolResponse, error)) error {
+	if _, ok := toolRequiredScopes[name]; !ok {
+		return fmt.Errorf("missing scope mapping for scoped tool %q", name)
+	}
+
+	return server.RegisterTool(name, description, func(args T) (*mcp_golang.ToolResponse, error) {
+		if denied := authorizeTool(name); denied != nil {
+			return denied, nil
+		}
+		return handler(args)
+	})
+}

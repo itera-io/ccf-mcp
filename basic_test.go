@@ -114,6 +114,10 @@ func TestArgumentStructs(t *testing.T) {
 			data: RefreshTaikunClientArgs{},
 		},
 		{
+			name: "RobotUserCapabilitiesArgs",
+			data: RobotUserCapabilitiesArgs{},
+		},
+		{
 			name: "CreateVirtualClusterArgs",
 			data: CreateVirtualClusterArgs{
 				ProjectID:       123,

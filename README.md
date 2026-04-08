@@ -90,6 +90,8 @@ TAIKUN_API_HOST=api-latest.osc1.sjc.cloudera.com
 
 The server will start and listen for MCP requests via stdio transport.
 
+When running with Robot User credentials, the server reads the current Robot User identity and assigned scopes from the API and exposes them via the `robot-user-capabilities` MCP tool. For tools with a known scope mapping, the server will fail fast with a clear JSON error if the Robot User lacks the required scope.
+
 ### Connecting from Claude Desktop
 
 Add this configuration to your Claude Desktop config:

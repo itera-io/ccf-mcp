@@ -55,6 +55,8 @@ This project provides an MCP (Model Context Protocol) server for Cloudera Cloud 
 #### Authentication
 - **Client Creation**: `taikungoclient.NewClientFromAccessKey(domainName, accessKey, secretKey, apiHost)`
 - **Environment Variables (legacy names)**: `TAIKUN_ACCESS_KEY`, `TAIKUN_SECRET_KEY`, `TAIKUN_API_HOST`, `TAIKUN_DOMAIN_NAME`
+- **Robot User Scopes**: Prefer checking the `robot-user-capabilities` tool when you need to understand which MCP actions the current Robot User can perform.
+- **Agent Scope Check**: At the beginning of any task that will call Cloudera Cloud Factory, check `robot-user-capabilities` first to confirm the current Robot User has the needed scopes. If the required access is missing, tell the user early instead of starting work that cannot succeed.
 
 ### Troubleshooting Resources
 

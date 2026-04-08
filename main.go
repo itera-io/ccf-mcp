@@ -42,6 +42,15 @@ type SuccessResponse struct {
 
 type RefreshTaikunClientArgs struct{}
 
+type RefreshTaikunClientResponse struct {
+	Message             string   `json:"message"`
+	Success             bool     `json:"success"`
+	RobotUserName       string   `json:"robotUserName,omitempty"`
+	OrganizationName    string   `json:"organizationName,omitempty"`
+	Scopes              []string `json:"scopes,omitempty"`
+	ScopeDiscoveryError string   `json:"scopeDiscoveryError,omitempty"`
+}
+
 type ProjectSummary struct {
 	ID                     int32   `json:"id"`
 	Name                   string  `json:"name"`
@@ -438,11 +447,20 @@ func createTaikunClient() *taikungoclient.Client {
 
 func refreshTaikunClient() *mcp_golang.ToolResponse {
 	taikunClient = createTaikunClient()
-	successResp := SuccessResponse{
-		Message: "Cloudera Cloud Factory client refreshed successfully",
-		Success: true,
-	}
+	robotCtx := refreshRobotUserContext()
+	successResp := newRefreshTaikunClientResponse(robotCtx)
 	return createJSONResponse(successResp)
+}
+
+func newRefreshTaikunClientResponse(robotCtx RobotUserContext) RefreshTaikunClientResponse {
+	return RefreshTaikunClientResponse{
+		Message:             "Cloudera Cloud Factory client refreshed successfully",
+		Success:             robotCtx.ScopeDiscoveryError == "",
+		RobotUserName:       robotCtx.Name,
+		OrganizationName:    robotCtx.OrganizationName,
+		Scopes:              robotCtx.Scopes,
+		ScopeDiscoveryError: robotCtx.ScopeDiscoveryError,
+	}
 }
 
 func main() {
@@ -463,13 +481,14 @@ func main() {
 
 	// Initialize the Cloudera Cloud Factory client once
 	taikunClient = createTaikunClient()
+	refreshRobotUserContext()
 	logger.Println("Cloudera Cloud Factory client initialized")
 
 	logger.Println("Starting tool registration...")
 
 	// --- MCP Tool Registrations ---
 
-	err := server.RegisterTool("refresh-taikun-client", "Refresh the Cloudera Cloud Factory API client using current environment credentials", func(args RefreshTaikunClientArgs) (*mcp_golang.ToolResponse, error) {
+	err := registerScopedTool(server, "refresh-taikun-client", "Refresh the Cloudera Cloud Factory API client using current environment credentials", func(args RefreshTaikunClientArgs) (*mcp_golang.ToolResponse, error) {
 		return refreshTaikunClient(), nil
 	})
 	if err != nil {
@@ -477,7 +496,15 @@ func main() {
 	}
 	logger.Println("Registered refresh-taikun-client tool")
 
-	err = server.RegisterTool("create-virtual-cluster", "Create a new virtual cluster (a project in Cloudera Cloud Factory) with optional wait for completion", func(args CreateVirtualClusterArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "robot-user-capabilities", "Show the current Robot User identity, scopes, and MCP tool access", func(args RobotUserCapabilitiesArgs) (*mcp_golang.ToolResponse, error) {
+		return getRobotUserCapabilities(), nil
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register robot-user-capabilities tool: %v", err)
+	}
+	logger.Println("Registered robot-user-capabilities tool")
+
+	err = registerScopedTool(server, "create-virtual-cluster", "Create a new virtual cluster (a project in Cloudera Cloud Factory) with optional wait for completion", func(args CreateVirtualClusterArgs) (*mcp_golang.ToolResponse, error) {
 		return createVirtualCluster(taikunClient, args)
 	})
 	if err != nil {
@@ -485,7 +512,7 @@ func main() {
 	}
 	logger.Println("Registered create-virtual-cluster tool")
 
-	err = server.RegisterTool("delete-virtual-cluster", "Delete a virtual cluster (a project in Cloudera Cloud Factory)", func(args DeleteVirtualClusterArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "delete-virtual-cluster", "Delete a virtual cluster (a project in Cloudera Cloud Factory)", func(args DeleteVirtualClusterArgs) (*mcp_golang.ToolResponse, error) {
 		return deleteVirtualCluster(taikunClient, args)
 	})
 	if err != nil {
@@ -493,7 +520,7 @@ func main() {
 	}
 	logger.Println("Registered delete-virtual-cluster tool")
 
-	err = server.RegisterTool("list-virtual-clusters", "List virtual clusters in a parent project (projects in Cloudera Cloud Factory)", func(args ListVirtualClustersArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "list-virtual-clusters", "List virtual clusters in a parent project (projects in Cloudera Cloud Factory)", func(args ListVirtualClustersArgs) (*mcp_golang.ToolResponse, error) {
 		return listVirtualClusters(taikunClient, args)
 	})
 	if err != nil {
@@ -501,7 +528,7 @@ func main() {
 	}
 	logger.Println("Registered list-virtual-clusters tool")
 
-	err = server.RegisterTool("catalog-create", "Create a new catalog", func(args CreateCatalogArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "catalog-create", "Create a new catalog", func(args CreateCatalogArgs) (*mcp_golang.ToolResponse, error) {
 		return createCatalog(taikunClient, args)
 	})
 	if err != nil {
@@ -509,7 +536,7 @@ func main() {
 	}
 	logger.Println("Registered catalog-create tool")
 
-	err = server.RegisterTool("catalog-list", "List catalogs with optional filtering", func(args ListCatalogsArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "catalog-list", "List catalogs with optional filtering", func(args ListCatalogsArgs) (*mcp_golang.ToolResponse, error) {
 		return listCatalogs(taikunClient, args)
 	})
 	if err != nil {
@@ -517,7 +544,7 @@ func main() {
 	}
 	logger.Println("Registered catalog-list tool")
 
-	err = server.RegisterTool("catalog-delete", "Delete a catalog", func(args DeleteCatalogArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "catalog-delete", "Delete a catalog", func(args DeleteCatalogArgs) (*mcp_golang.ToolResponse, error) {
 		return deleteCatalog(taikunClient, args)
 	})
 	if err != nil {
@@ -525,7 +552,7 @@ func main() {
 	}
 	logger.Println("Registered catalog-delete tool")
 
-	err = server.RegisterTool("available-apps-list", "List available apps from the package repository", func(args ListAvailableAppsArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "available-apps-list", "List available apps from the package repository", func(args ListAvailableAppsArgs) (*mcp_golang.ToolResponse, error) {
 		return listAvailableApps(taikunClient, args)
 	})
 	if err != nil {
@@ -533,7 +560,7 @@ func main() {
 	}
 	logger.Println("Registered available-apps-list tool")
 
-	err = server.RegisterTool("catalog-app-add", "Add an application to a catalog with optional default parameters", func(args AddAppToCatalogWithParametersArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "catalog-app-add", "Add an application to a catalog with optional default parameters", func(args AddAppToCatalogWithParametersArgs) (*mcp_golang.ToolResponse, error) {
 		return addAppToCatalogWithParameters(taikunClient, args)
 	})
 	if err != nil {
@@ -541,7 +568,7 @@ func main() {
 	}
 	logger.Println("Registered catalog-app-add tool")
 
-	err = server.RegisterTool("catalog-apps-list", "List applications in a specific catalog or all catalogs", func(args ListCatalogAppsArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "catalog-apps-list", "List applications in a specific catalog or all catalogs", func(args ListCatalogAppsArgs) (*mcp_golang.ToolResponse, error) {
 		return listCatalogApps(taikunClient, args)
 	})
 	if err != nil {
@@ -549,7 +576,7 @@ func main() {
 	}
 	logger.Println("Registered catalog-apps-list tool")
 
-	err = server.RegisterTool("catalog-app-params", "Get available and added parameters for a catalog application", func(args GetCatalogAppParamsArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "catalog-app-params", "Get available and added parameters for a catalog application", func(args GetCatalogAppParamsArgs) (*mcp_golang.ToolResponse, error) {
 		return getCatalogAppParameters(taikunClient, args)
 	})
 	if err != nil {
@@ -557,7 +584,7 @@ func main() {
 	}
 	logger.Println("Registered catalog-app-params tool")
 
-	err = server.RegisterTool("catalog-app-defaults-set", "Update default parameters for a catalog application (merges with existing defaults by default)", func(args SetCatalogAppDefaultParamsArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "catalog-app-defaults-set", "Update default parameters for a catalog application (merges with existing defaults by default)", func(args SetCatalogAppDefaultParamsArgs) (*mcp_golang.ToolResponse, error) {
 		return updateCatalogAppParameters(taikunClient, args)
 	})
 	if err != nil {
@@ -565,7 +592,7 @@ func main() {
 	}
 	logger.Println("Registered catalog-app-defaults-set tool")
 
-	err = server.RegisterTool("app-install", "Install a new application instance with optional defaults and overrides", func(args InstallAppArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "app-install", "Install a new application instance with optional defaults and overrides", func(args InstallAppArgs) (*mcp_golang.ToolResponse, error) {
 		return installApp(taikunClient, args)
 	})
 	if err != nil {
@@ -573,7 +600,7 @@ func main() {
 	}
 	logger.Println("Registered app-install tool")
 
-	err = server.RegisterTool("list-apps", "List application instances in a project", func(args ListAppsArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "list-apps", "List application instances in a project", func(args ListAppsArgs) (*mcp_golang.ToolResponse, error) {
 		return listApps(taikunClient, args)
 	})
 	if err != nil {
@@ -581,7 +608,7 @@ func main() {
 	}
 	logger.Println("Registered list-apps tool")
 
-	err = server.RegisterTool("get-app", "Get detailed application instance information", func(args GetAppArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "get-app", "Get detailed application instance information", func(args GetAppArgs) (*mcp_golang.ToolResponse, error) {
 		return getApp(taikunClient, args)
 	})
 	if err != nil {
@@ -589,7 +616,7 @@ func main() {
 	}
 	logger.Println("Registered get-app tool")
 
-	err = server.RegisterTool("update-sync-app", "Update application values and sync", func(args UpdateSyncAppArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "update-sync-app", "Update application values and sync", func(args UpdateSyncAppArgs) (*mcp_golang.ToolResponse, error) {
 		return updateSyncApp(taikunClient, args)
 	})
 	if err != nil {
@@ -597,7 +624,7 @@ func main() {
 	}
 	logger.Println("Registered update-sync-app tool")
 
-	err = server.RegisterTool("uninstall-app", "Uninstall an application instance", func(args UninstallAppArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "uninstall-app", "Uninstall an application instance", func(args UninstallAppArgs) (*mcp_golang.ToolResponse, error) {
 		return uninstallApp(taikunClient, args)
 	})
 	if err != nil {
@@ -605,7 +632,7 @@ func main() {
 	}
 	logger.Println("Registered uninstall-app tool")
 
-	err = server.RegisterTool("wait-for-app", "Wait for an application instance to be ready", func(args WaitForAppArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "wait-for-app", "Wait for an application instance to be ready", func(args WaitForAppArgs) (*mcp_golang.ToolResponse, error) {
 		return waitForApp(taikunClient, args)
 	})
 	if err != nil {
@@ -613,7 +640,7 @@ func main() {
 	}
 	logger.Println("Registered wait-for-app tool")
 
-	err = server.RegisterTool("list-projects", "List Kubernetes projects with optional virtual cluster filtering", func(args ListProjectsArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "list-projects", "List Kubernetes projects with optional virtual cluster filtering", func(args ListProjectsArgs) (*mcp_golang.ToolResponse, error) {
 		return listProjects(taikunClient, args)
 	})
 	if err != nil {
@@ -621,7 +648,7 @@ func main() {
 	}
 	logger.Println("Registered list-projects tool")
 
-	err = server.RegisterTool("create-project", "Create a new Kubernetes project in Cloudera Cloud Factory", func(args CreateProjectArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "create-project", "Create a new Kubernetes project in Cloudera Cloud Factory", func(args CreateProjectArgs) (*mcp_golang.ToolResponse, error) {
 		return createProject(taikunClient, args)
 	})
 	if err != nil {
@@ -629,7 +656,7 @@ func main() {
 	}
 	logger.Println("Registered create-project tool")
 
-	err = server.RegisterTool("delete-project", "Delete a project in Cloudera Cloud Factory", func(args DeleteProjectArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "delete-project", "Delete a project in Cloudera Cloud Factory", func(args DeleteProjectArgs) (*mcp_golang.ToolResponse, error) {
 		return deleteProject(taikunClient, args)
 	})
 	if err != nil {
@@ -637,7 +664,7 @@ func main() {
 	}
 	logger.Println("Registered delete-project tool")
 
-	err = server.RegisterTool("wait-for-project", "Wait for a project to be ready and healthy", func(args WaitForProjectArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "wait-for-project", "Wait for a project to be ready and healthy", func(args WaitForProjectArgs) (*mcp_golang.ToolResponse, error) {
 		return waitForProject(taikunClient, args)
 	})
 	if err != nil {
@@ -645,7 +672,7 @@ func main() {
 	}
 	logger.Println("Registered wait-for-project tool")
 
-	err = server.RegisterTool("deploy-kubernetes-resources", "Deploy Kubernetes resources via YAML in a project", func(args DeployKubernetesResourcesArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "deploy-kubernetes-resources", "Deploy Kubernetes resources via YAML in a project", func(args DeployKubernetesResourcesArgs) (*mcp_golang.ToolResponse, error) {
 		return deployKubernetesResources(taikunClient, args)
 	})
 	if err != nil {
@@ -653,7 +680,7 @@ func main() {
 	}
 	logger.Println("Registered deploy-kubernetes-resources tool")
 
-	err = server.RegisterTool("create-kubeconfig", "Create a new kubeconfig for a project", func(args CreateKubeConfigArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "create-kubeconfig", "Create a new kubeconfig for a project", func(args CreateKubeConfigArgs) (*mcp_golang.ToolResponse, error) {
 		return createKubeConfig(taikunClient, args)
 	})
 	if err != nil {
@@ -661,7 +688,7 @@ func main() {
 	}
 	logger.Println("Registered create-kubeconfig tool")
 
-	err = server.RegisterTool("get-kubeconfig", "Retrieve the kubeconfig content for a project (optionally save as YAML)", func(args GetKubeConfigArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "get-kubeconfig", "Retrieve the kubeconfig content for a project (optionally save as YAML)", func(args GetKubeConfigArgs) (*mcp_golang.ToolResponse, error) {
 		return getKubeConfig(taikunClient, args)
 	})
 	if err != nil {
@@ -669,7 +696,7 @@ func main() {
 	}
 	logger.Println("Registered get-kubeconfig tool")
 
-	err = server.RegisterTool("list-kubeconfig-roles", "List available roles for kubeconfigs", func(args ListKubeConfigRolesArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "list-kubeconfig-roles", "List available roles for kubeconfigs", func(args ListKubeConfigRolesArgs) (*mcp_golang.ToolResponse, error) {
 		return listKubeConfigRoles(taikunClient, args)
 	})
 	if err != nil {
@@ -677,7 +704,7 @@ func main() {
 	}
 	logger.Println("Registered list-kubeconfig-roles tool")
 
-	err = server.RegisterTool("list-kubernetes-resources", "List specialized Kubernetes resources in a project", func(args ListKubernetesResourcesArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "list-kubernetes-resources", "List specialized Kubernetes resources in a project", func(args ListKubernetesResourcesArgs) (*mcp_golang.ToolResponse, error) {
 		return listKubernetesResources(taikunClient, args)
 	})
 	if err != nil {
@@ -685,7 +712,7 @@ func main() {
 	}
 	logger.Println("Registered list-kubernetes-resources tool")
 
-	err = server.RegisterTool("describe-kubernetes-resource", "Describe a specialized Kubernetes resource in a project", func(args DescribeKubernetesResourceArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "describe-kubernetes-resource", "Describe a specialized Kubernetes resource in a project", func(args DescribeKubernetesResourceArgs) (*mcp_golang.ToolResponse, error) {
 		return describeKubernetesResource(taikunClient, args)
 	})
 	if err != nil {
@@ -693,7 +720,7 @@ func main() {
 	}
 	logger.Println("Registered describe-kubernetes-resource tool")
 
-	err = server.RegisterTool("delete-kubernetes-resource", "Delete a Kubernetes resource", func(args DeleteKubernetesResourceArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "delete-kubernetes-resource", "Delete a Kubernetes resource", func(args DeleteKubernetesResourceArgs) (*mcp_golang.ToolResponse, error) {
 		return deleteKubernetesResource(taikunClient, args)
 	})
 	if err != nil {
@@ -701,7 +728,7 @@ func main() {
 	}
 	logger.Println("Registered delete-kubernetes-resource tool")
 
-	err = server.RegisterTool("patch-kubernetes-resource", "Patch a Kubernetes resource using YAML", func(args PatchKubernetesResourceArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "patch-kubernetes-resource", "Patch a Kubernetes resource using YAML", func(args PatchKubernetesResourceArgs) (*mcp_golang.ToolResponse, error) {
 		return patchKubernetesResource(taikunClient, args)
 	})
 	if err != nil {
@@ -709,7 +736,7 @@ func main() {
 	}
 	logger.Println("Registered patch-kubernetes-resource tool")
 
-	err = server.RegisterTool("list-cloud-credentials", "List cloud credentials", func(args ListCloudCredentialsArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "list-cloud-credentials", "List cloud credentials", func(args ListCloudCredentialsArgs) (*mcp_golang.ToolResponse, error) {
 		return listCloudCredentials(taikunClient, args)
 	})
 	if err != nil {
@@ -717,7 +744,7 @@ func main() {
 	}
 	logger.Println("Registered list-cloud-credentials tool")
 
-	err = server.RegisterTool("bind-flavors-to-project", "Bind flavors to a project", func(args BindFlavorsArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "bind-flavors-to-project", "Bind flavors to a project", func(args BindFlavorsArgs) (*mcp_golang.ToolResponse, error) {
 		return bindFlavorsToProject(taikunClient, args)
 	})
 	if err != nil {
@@ -725,7 +752,7 @@ func main() {
 	}
 	logger.Println("Registered bind-flavors-to-project tool")
 
-	err = server.RegisterTool("add-server-to-project", "Add a server to a project. Recommendation: Bastion needs min flavor (2 CPUs, 2GB RAM), Master and Worker need at least 4 CPUs and 4GB RAM.", func(args AddServerArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "add-server-to-project", "Add a server to a project. Recommendation: Bastion needs min flavor (2 CPUs, 2GB RAM), Master and Worker need at least 4 CPUs and 4GB RAM.", func(args AddServerArgs) (*mcp_golang.ToolResponse, error) {
 		return addServerToProject(taikunClient, args)
 	})
 	if err != nil {
@@ -733,7 +760,7 @@ func main() {
 	}
 	logger.Println("Registered add-server-to-project tool")
 
-	err = server.RegisterTool("commit-project", "Commit and deploy a project. Note: Initial deployment takes 10-30 minutes.", func(args CommitProjectArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "commit-project", "Commit and deploy a project. Note: Initial deployment takes 10-30 minutes.", func(args CommitProjectArgs) (*mcp_golang.ToolResponse, error) {
 		return commitProject(taikunClient, args)
 	})
 	if err != nil {
@@ -741,7 +768,7 @@ func main() {
 	}
 	logger.Println("Registered commit-project tool")
 
-	err = server.RegisterTool("get-project-details", "Get detailed status of a project", func(args GetProjectDetailsArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "get-project-details", "Get detailed status of a project", func(args GetProjectDetailsArgs) (*mcp_golang.ToolResponse, error) {
 		return getProjectDetails(taikunClient, args)
 	})
 	if err != nil {
@@ -749,7 +776,7 @@ func main() {
 	}
 	logger.Println("Registered get-project-details tool")
 
-	err = server.RegisterTool("list-flavors", "List available flavors for a cloud credential", func(args ListFlavorsArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "list-flavors", "List available flavors for a cloud credential", func(args ListFlavorsArgs) (*mcp_golang.ToolResponse, error) {
 		return listFlavors(taikunClient, args)
 	})
 	if err != nil {
@@ -757,7 +784,7 @@ func main() {
 	}
 	logger.Println("Registered list-flavors tool")
 
-	err = server.RegisterTool("list-servers", "List servers in a project", func(args ListServersArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "list-servers", "List servers in a project", func(args ListServersArgs) (*mcp_golang.ToolResponse, error) {
 		return listServers(taikunClient, args)
 	})
 	if err != nil {
@@ -765,7 +792,7 @@ func main() {
 	}
 	logger.Println("Registered list-servers tool")
 
-	err = server.RegisterTool("delete-servers-from-project", "Delete servers from a project", func(args DeleteServersArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "delete-servers-from-project", "Delete servers from a project", func(args DeleteServersArgs) (*mcp_golang.ToolResponse, error) {
 		return deleteServersFromProject(taikunClient, args)
 	})
 	if err != nil {
