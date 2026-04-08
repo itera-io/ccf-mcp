@@ -59,43 +59,25 @@ go install github.com/itera-io/cloudera-cloud-factory-mcp@latest
 
 ## Configuration
 
-The server supports multiple authentication methods with the Cloudera Cloud Factory API. Choose one of the following options (legacy `TAIKUN_*` environment variables are kept for compatibility):
-
-### Option 1: Access Key/Secret Key Authentication (Recommended)
+The server authenticates to the Cloudera Cloud Factory API with **Robot User** credentials. Use the legacy `TAIKUN_*` environment variable names expected by the upstream Go client.
 
 ```bash
-export TAIKUN_ACCESS_KEY="your-access-key"
-export TAIKUN_SECRET_KEY="your-secret-key"
-export TAIKUN_AUTH_MODE="token"  # Optional, defaults to "token"
-export TAIKUN_API_HOST="api.taikun.cloud"  # Optional, defaults to api.taikun.cloud
+export TAIKUN_ACCESS_KEY="your-robot-user-access-key"
+export TAIKUN_SECRET_KEY="your-robot-user-secret-key"
+export TAIKUN_API_HOST="api-latest.osc1.sjc.cloudera.com"  # Optional, defaults to api-latest.osc1.sjc.cloudera.com
+export TAIKUN_DOMAIN_NAME=""  # Optional, only set if your environment requires it
 ```
-
-### Option 2: Email/Password Authentication
-
-```bash
-export TAIKUN_EMAIL="your-email@example.com"
-export TAIKUN_PASSWORD="your-password"
-export TAIKUN_API_HOST="api.taikun.cloud"  # Optional, defaults to api.taikun.cloud
-```
-
 
 ### Environment File
 
-You can also create a `.env` file with your preferred authentication method:
+You can also create a `.env` file:
 
-**For Access Key/Secret Key:**
 ```bash
-TAIKUN_ACCESS_KEY=your-access-key
-TAIKUN_SECRET_KEY=your-secret-key
-TAIKUN_AUTH_MODE=token
-TAIKUN_API_HOST=api.taikun.cloud
-```
-
-**For Email/Password:**
-```bash
-TAIKUN_EMAIL=your-email@example.com
-TAIKUN_PASSWORD=your-password
-TAIKUN_API_HOST=api.taikun.cloud
+TAIKUN_ACCESS_KEY=your-robot-user-access-key
+TAIKUN_SECRET_KEY=your-robot-user-secret-key
+TAIKUN_API_HOST=api-latest.osc1.sjc.cloudera.com
+# Optional:
+# TAIKUN_DOMAIN_NAME=your-domain-name
 ```
 
 ## Usage
@@ -110,33 +92,17 @@ The server will start and listen for MCP requests via stdio transport.
 
 ### Connecting from Claude Desktop
 
-Add this configuration to your Claude Desktop config using your preferred authentication method:
+Add this configuration to your Claude Desktop config:
 
-**For Access Key/Secret Key Authentication:**
 ```json
 {
   "mcpServers": {
     "cloudera-cloud-factory": {
       "command": "/path/to/cloudera-cloud-factory-mcp",
       "env": {
-        "TAIKUN_ACCESS_KEY": "your-access-key",
-        "TAIKUN_SECRET_KEY": "your-secret-key",
-        "TAIKUN_AUTH_MODE": "token"
-      }
-    }
-  }
-}
-```
-
-**For Email/Password Authentication:**
-```json
-{
-  "mcpServers": {
-    "cloudera-cloud-factory": {
-      "command": "/path/to/cloudera-cloud-factory-mcp",
-      "env": {
-        "TAIKUN_EMAIL": "your-email@example.com",
-        "TAIKUN_PASSWORD": "your-password"
+        "TAIKUN_ACCESS_KEY": "your-robot-user-access-key",
+        "TAIKUN_SECRET_KEY": "your-robot-user-secret-key",
+        "TAIKUN_API_HOST": "api-latest.osc1.sjc.cloudera.com"
       }
     }
   }

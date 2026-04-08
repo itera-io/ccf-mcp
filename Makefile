@@ -57,7 +57,7 @@ test-all:
 .PHONY: test-integration
 test-integration:
 	@echo "Running integration tests..."
-	@echo "Make sure TAIKUN_EMAIL and TAIKUN_PASSWORD are set"
+	@echo "Make sure TAIKUN_ACCESS_KEY and TAIKUN_SECRET_KEY are set"
 	$(GOTEST) -v -tags=integration -run TestIntegration ./...
 
 # Run tests with coverage

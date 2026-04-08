@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/itera-io/taikungoclient"
 	mcp_golang "github.com/metoro-io/mcp-golang"
@@ -25,6 +26,8 @@ var (
 	logFilePath  = "/tmp/cloudera_cloud_factory_mcp_server.log"
 	taikunClient *taikungoclient.Client
 )
+
+const defaultAPIHost = "api-latest.osc1.sjc.cloudera.com"
 
 // Response structs for JSON formatting
 type ErrorResponse struct {
@@ -256,10 +259,10 @@ type WaitForProjectArgs struct {
 }
 
 type WaitForAppArgs struct {
-	ProjectAppId               int32 `json:"projectAppId" jsonschema:"required,description=The ID of the project application to wait for"`
-	Timeout                    int32 `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds (default: 60 for creation, 30 for deletion)"`
-	WaitDeleted                bool  `json:"waitDeleted,omitempty" jsonschema:"description=Wait for the application to be deleted (default: false)"`
-	ReadyStabilizationSeconds  int32 `json:"readyStabilizationSeconds,omitempty" jsonschema:"description=Seconds the app must remain in Ready state before success (default: 30)"`
+	ProjectAppId              int32 `json:"projectAppId" jsonschema:"required,description=The ID of the project application to wait for"`
+	Timeout                   int32 `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds (default: 60 for creation, 30 for deletion)"`
+	WaitDeleted               bool  `json:"waitDeleted,omitempty" jsonschema:"description=Wait for the application to be deleted (default: false)"`
+	ReadyStabilizationSeconds int32 `json:"readyStabilizationSeconds,omitempty" jsonschema:"description=Seconds the app must remain in Ready state before success (default: 30)"`
 }
 
 type DeleteServersArgs struct {
@@ -374,40 +377,63 @@ func initLogger() {
 	logger.Println("Logger initialized")
 }
 
+type robotUserAuthConfig struct {
+	APIHost    string
+	DomainName string
+	AccessKey  string
+	SecretKey  string
+}
+
+func resolveRobotUserAuthConfig(getenv func(string) string) (robotUserAuthConfig, error) {
+	cfg := robotUserAuthConfig{
+		APIHost:    strings.TrimSpace(getenv("TAIKUN_API_HOST")),
+		DomainName: strings.TrimSpace(getenv("TAIKUN_DOMAIN_NAME")),
+		AccessKey:  strings.TrimSpace(getenv("TAIKUN_ACCESS_KEY")),
+		SecretKey:  strings.TrimSpace(getenv("TAIKUN_SECRET_KEY")),
+	}
+
+	if cfg.APIHost == "" {
+		cfg.APIHost = defaultAPIHost
+	}
+
+	if cfg.AccessKey != "" || cfg.SecretKey != "" {
+		if cfg.AccessKey == "" || cfg.SecretKey == "" {
+			return robotUserAuthConfig{}, fmt.Errorf("incomplete Robot User credentials: set both TAIKUN_ACCESS_KEY and TAIKUN_SECRET_KEY")
+		}
+		return cfg, nil
+	}
+
+	email := strings.TrimSpace(getenv("TAIKUN_EMAIL"))
+	password := strings.TrimSpace(getenv("TAIKUN_PASSWORD"))
+	if email != "" || password != "" {
+		return robotUserAuthConfig{}, fmt.Errorf("email/password authentication is no longer supported by this MCP server; configure Robot User credentials with TAIKUN_ACCESS_KEY and TAIKUN_SECRET_KEY")
+	}
+
+	return robotUserAuthConfig{}, fmt.Errorf("missing Robot User credentials: set TAIKUN_ACCESS_KEY and TAIKUN_SECRET_KEY; optionally set TAIKUN_API_HOST and TAIKUN_DOMAIN_NAME")
+}
+
 func createTaikunClient() *taikungoclient.Client {
-	apiHost := os.Getenv("TAIKUN_API_HOST")
+	cfg, err := resolveRobotUserAuthConfig(os.Getenv)
+	if err != nil {
+		logger.Fatal(err.Error())
+		return nil
+	}
+
+	apiHost := cfg.APIHost
 	if apiHost == "" {
-		apiHost = "api.taikun.cloud"
+		apiHost = defaultAPIHost
 	}
 	logger.Printf("Using API host: %s", apiHost)
 
-	authMode := os.Getenv("TAIKUN_AUTH_MODE")
-
-	// Check for access key/secret key authentication
-	accessKey := os.Getenv("TAIKUN_ACCESS_KEY")
-	secretKey := os.Getenv("TAIKUN_SECRET_KEY")
-
-	if accessKey != "" && secretKey != "" {
-		if authMode == "" {
-			authMode = "token"
-		}
-		logger.Printf("Using access key/secret key authentication with mode: %s", authMode)
-		return taikungoclient.NewClientFromCredentials("", "", accessKey, secretKey, authMode, apiHost)
+	if cfg.DomainName != "" {
+		logger.Printf("Using Cloudera Cloud Factory domain name: %s", cfg.DomainName)
+	}
+	if strings.TrimSpace(os.Getenv("TAIKUN_AUTH_MODE")) != "" {
+		logger.Printf("Ignoring TAIKUN_AUTH_MODE for Robot User authentication")
 	}
 
-	// Check for email/password (standard taikungoclient env vars)
-	email := os.Getenv("TAIKUN_EMAIL")
-	password := os.Getenv("TAIKUN_PASSWORD")
-
-	if email != "" && password != "" {
-		logger.Printf("Using email/password authentication for user: %s", email)
-		return taikungoclient.NewClientFromCredentials(email, password, "", "", "", apiHost)
-	}
-
-	logger.Fatal("No valid authentication credentials found. Please set either:\n" +
-		"  - TAIKUN_ACCESS_KEY + TAIKUN_SECRET_KEY + TAIKUN_AUTH_MODE (optional, defaults to 'token')\n" +
-		"  - TAIKUN_EMAIL + TAIKUN_PASSWORD")
-	return nil
+	logger.Printf("Using Robot User authentication via access key/secret key")
+	return taikungoclient.NewClientFromAccessKey(cfg.DomainName, cfg.AccessKey, cfg.SecretKey, apiHost)
 }
 
 func refreshTaikunClient() *mcp_golang.ToolResponse {

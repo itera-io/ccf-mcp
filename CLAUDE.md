@@ -53,8 +53,8 @@ This project provides an MCP (Model Context Protocol) server for Cloudera Cloud 
 - **Project Apps**: Application deployment patterns in Terraform provider
 
 #### Authentication
-- **Client Creation**: `taikungoclient.NewClientFromCredentials(username, password, "", "", "", apiHost)`
-- **Environment Variables (legacy names)**: `TAIKUN_EMAIL`, `TAIKUN_PASSWORD`, `TAIKUN_API_HOST`
+- **Client Creation**: `taikungoclient.NewClientFromAccessKey(domainName, accessKey, secretKey, apiHost)`
+- **Environment Variables (legacy names)**: `TAIKUN_ACCESS_KEY`, `TAIKUN_SECRET_KEY`, `TAIKUN_API_HOST`, `TAIKUN_DOMAIN_NAME`
 
 ### Troubleshooting Resources
 
