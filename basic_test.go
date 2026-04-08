@@ -279,6 +279,125 @@ func TestArgumentStructs(t *testing.T) {
 				WaitDeleted:  true,
 			},
 		},
+		{
+			name: "JSONPayloadArgs",
+			data: JSONPayloadArgs{
+				Payload: `{"name":"example"}`,
+			},
+		},
+		{
+			name: "IDArgs",
+			data: IDArgs{
+				ID: 123,
+			},
+		},
+		{
+			name: "IDPayloadArgs",
+			data: IDPayloadArgs{
+				ID:      123,
+				Payload: `{"name":"example"}`,
+			},
+		},
+		{
+			name: "ProjectIDArgs",
+			data: ProjectIDArgs{
+				ProjectID: 123,
+			},
+		},
+		{
+			name: "ProjectBackupCredentialArgs",
+			data: ProjectBackupCredentialArgs{
+				ProjectID:          123,
+				BackupCredentialID: 456,
+			},
+		},
+		{
+			name: "ProjectAICredentialArgs",
+			data: ProjectAICredentialArgs{
+				ProjectID:      123,
+				AICredentialID: 456,
+			},
+		},
+		{
+			name: "ProjectPolicyProfileArgs",
+			data: ProjectPolicyProfileArgs{
+				ProjectID:       123,
+				PolicyProfileID: 456,
+			},
+		},
+		{
+			name: "ProjectIDPayloadArgs",
+			data: ProjectIDPayloadArgs{
+				ProjectID: 123,
+				Payload:   `{"enabled":true}`,
+			},
+		},
+		{
+			name: "ProjectNameArgs",
+			data: ProjectNameArgs{
+				ProjectID: 123,
+				Name:      "backup-1",
+			},
+		},
+		{
+			name: "LockModeArgs",
+			data: LockModeArgs{
+				ID:   123,
+				Mode: "lock",
+			},
+		},
+		{
+			name: "SearchListArgs",
+			data: SearchListArgs{
+				Limit:          10,
+				Offset:         5,
+				Search:         "example",
+				SortBy:         "name",
+				SortDirection:  "asc",
+				OrganizationID: 12,
+				DomainID:       34,
+				ID:             56,
+				SearchID:       "78",
+				CloudID:        90,
+			},
+		},
+		{
+			name: "ProjectSearchListArgs",
+			data: ProjectSearchListArgs{
+				ProjectID:      123,
+				Limit:          10,
+				Offset:         5,
+				Search:         "vm",
+				SortBy:         "name",
+				SortDirection:  "desc",
+				FilterBy:       "running",
+				OrganizationID: 12,
+				ID:             34,
+			},
+		},
+		{
+			name: "ImageListArgs",
+			data: ImageListArgs{
+				Provider:      "aws",
+				Mode:          "common",
+				CloudID:       123,
+				ProjectID:     456,
+				Limit:         10,
+				Offset:        5,
+				Search:        "ubuntu",
+				SortBy:        "name",
+				SortDirection: "asc",
+				Payload:       `{"region":"us-east-1"}`,
+			},
+		},
+		{
+			name: "StandaloneWindowsPasswordArgs",
+			data: StandaloneWindowsPasswordArgs{
+				ID:         123,
+				Key:        "secret",
+				ConfigPath: "/tmp/config",
+			},
+		},
 	}
 
 	for _, tt := range tests {

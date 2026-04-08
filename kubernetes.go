@@ -473,6 +473,46 @@ type PatchKubernetesResourceArgs struct {
 
 type ListKubeConfigRolesArgs struct{}
 
+const awsKubeConfigRoleID int32 = 1
+
+func resolveProjectCloudType(client *taikungoclient.Client, projectID int32) (string, *mcp_golang.ToolResponse) {
+	ctx := context.Background()
+
+	projectList, httpResponse, err := client.Client.ProjectsAPI.ProjectsList(ctx).
+		Id(projectID).
+		Execute()
+	if err != nil {
+		return "", createError(httpResponse, err)
+	}
+	if errorResp := checkResponse(httpResponse, "get project details"); errorResp != nil {
+		return "", errorResp
+	}
+	if projectList == nil || len(projectList.Data) == 0 {
+		return "", createJSONResponse(ErrorResponse{
+			Error: fmt.Sprintf("Project with ID %d not found", projectID),
+		})
+	}
+
+	return string(projectList.Data[0].GetCloudType()), nil
+}
+
+func normalizeKubeConfigRoleID(projectID int32, cloudType string, requestedRoleID int32) (int32, *mcp_golang.ToolResponse) {
+	if !strings.EqualFold(strings.TrimSpace(cloudType), "AWS") {
+		return requestedRoleID, nil
+	}
+	if requestedRoleID == 0 {
+		return awsKubeConfigRoleID, nil
+	}
+	if requestedRoleID != awsKubeConfigRoleID {
+		return 0, createJSONResponse(ErrorResponse{
+			Error:   fmt.Sprintf("AWS-based project %d only supports kubeConfigRoleId %d", projectID, awsKubeConfigRoleID),
+			Details: fmt.Sprintf("Project cloudType %q requires kubeConfigRoleId %d when creating kubeconfigs", cloudType, awsKubeConfigRoleID),
+		})
+	}
+
+	return awsKubeConfigRoleID, nil
+}
+
 func deployKubernetesResources(client *taikungoclient.Client, args DeployKubernetesResourcesArgs) (*mcp_golang.ToolResponse, error) {
 	ctx := context.Background()
 
@@ -511,6 +551,14 @@ func deployKubernetesResources(client *taikungoclient.Client, args DeployKuberne
 
 func createKubeConfig(client *taikungoclient.Client, args CreateKubeConfigArgs) (*mcp_golang.ToolResponse, error) {
 	ctx := context.Background()
+	projectCloudType, errorResp := resolveProjectCloudType(client, args.ProjectID)
+	if errorResp != nil {
+		return errorResp, nil
+	}
+	kubeConfigRoleID, errorResp := normalizeKubeConfigRoleID(args.ProjectID, projectCloudType, args.KubeConfigRoleId)
+	if errorResp != nil {
+		return errorResp, nil
+	}
 
 	createCmd := taikuncore.NewCreateKubeConfigCommand()
 	createCmd.SetProjectId(args.ProjectID)
@@ -521,8 +569,8 @@ func createKubeConfig(client *taikungoclient.Client, args CreateKubeConfigArgs) 
 	createCmd.SetIsAccessibleForAll(args.IsAccessibleForAll)
 	createCmd.SetIsAccessibleForManager(args.IsAccessibleForManager)
 
-	if args.KubeConfigRoleId != 0 {
-		createCmd.SetKubeConfigRoleId(args.KubeConfigRoleId)
+	if kubeConfigRoleID != 0 {
+		createCmd.SetKubeConfigRoleId(kubeConfigRoleID)
 	}
 	if args.UserId != "" {
 		createCmd.SetUserId(args.UserId)

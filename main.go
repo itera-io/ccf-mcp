@@ -342,18 +342,7 @@ func createJSONResponse(data interface{}) *mcp_golang.ToolResponse {
 
 // createError creates a formatted error response for MCP tools
 func createError(response *http.Response, err error) *mcp_golang.ToolResponse {
-	// Use taikungoclient's CreateError for detailed error messages
-	taikunErr := taikungoclient.CreateError(response, err)
-
-	var errorResp ErrorResponse
-	if taikunErr != nil {
-		errorResp.Error = taikunErr.Error()
-	} else {
-		errorResp.Error = "Unknown error occurred"
-	}
-
-	logger.Printf("Error occurred: %s", errorResp.Error)
-	return createJSONResponse(errorResp)
+	return apiErrorInfoFromResponse(response, err).toolResponse()
 }
 
 // checkResponse validates HTTP response status codes
@@ -760,7 +749,7 @@ func main() {
 	}
 	logger.Println("Registered add-server-to-project tool")
 
-	err = registerScopedTool(server, "commit-project", "Commit and deploy a project. Note: Initial deployment takes 10-30 minutes.", func(args CommitProjectArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "commit-project", "Commit and deploy a project. Note: Initial deployment takes 10-30 minutes; do not call this while the project status is Updating.", func(args CommitProjectArgs) (*mcp_golang.ToolResponse, error) {
 		return commitProject(taikunClient, args)
 	})
 	if err != nil {
@@ -799,6 +788,388 @@ func main() {
 		logger.Fatalf("Failed to register delete-servers-from-project tool: %v", err)
 	}
 	logger.Println("Registered delete-servers-from-project tool")
+
+	mustRegisterScopedTool(server, "list-access-profiles", "List access profiles", func(args SearchListArgs) (*mcp_golang.ToolResponse, error) {
+		return listAccessProfiles(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "create-access-profile", "Create an access profile", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createAccessProfile(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-access-profile", "Update an access profile", func(args IDPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return updateAccessProfile(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "delete-access-profile", "Delete an access profile", func(args IDArgs) (*mcp_golang.ToolResponse, error) {
+		return deleteAccessProfile(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "dropdown-access-profiles", "List access profile dropdown entries", func(args SearchListArgs) (*mcp_golang.ToolResponse, error) {
+		return dropdownAccessProfiles(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "lock-access-profile", "Lock or unlock an access profile", func(args LockModeArgs) (*mcp_golang.ToolResponse, error) {
+		return lockAccessProfile(taikunClient, args)
+	})
+
+	mustRegisterScopedTool(server, "list-ai-credentials", "List AI credentials", func(args SearchListArgs) (*mcp_golang.ToolResponse, error) {
+		return listAICredentials(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "create-ai-credential", "Create an AI credential", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createAICredential(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "delete-ai-credential", "Delete an AI credential", func(args IDArgs) (*mcp_golang.ToolResponse, error) {
+		return deleteAICredential(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "dropdown-ai-credentials", "List AI credential dropdown entries", func(args SearchListArgs) (*mcp_golang.ToolResponse, error) {
+		return dropdownAICredentials(taikunClient, args)
+	})
+
+	mustRegisterScopedTool(server, "list-kubernetes-profiles", "List Kubernetes profiles", func(args SearchListArgs) (*mcp_golang.ToolResponse, error) {
+		return listKubernetesProfiles(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "create-kubernetes-profile", "Create a Kubernetes profile", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createKubernetesProfile(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "delete-kubernetes-profile", "Delete a Kubernetes profile", func(args IDArgs) (*mcp_golang.ToolResponse, error) {
+		return deleteKubernetesProfile(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "dropdown-kubernetes-profiles", "List Kubernetes profile dropdown entries", func(args SearchListArgs) (*mcp_golang.ToolResponse, error) {
+		return dropdownKubernetesProfiles(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "lock-kubernetes-profile", "Lock or unlock a Kubernetes profile", func(args LockModeArgs) (*mcp_golang.ToolResponse, error) {
+		return lockKubernetesProfile(taikunClient, args)
+	})
+
+	mustRegisterScopedTool(server, "list-opa-profiles", "List OPA profiles", func(args SearchListArgs) (*mcp_golang.ToolResponse, error) {
+		return listOPAProfiles(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "create-opa-profile", "Create an OPA profile", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createOPAProfile(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-opa-profile", "Update an OPA profile", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return updateOPAProfile(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "delete-opa-profile", "Delete an OPA profile", func(args IDArgs) (*mcp_golang.ToolResponse, error) {
+		return deleteOPAProfile(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "dropdown-opa-profiles", "List OPA profile dropdown entries", func(args SearchListArgs) (*mcp_golang.ToolResponse, error) {
+		return dropdownOPAProfiles(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "lock-opa-profile", "Lock or unlock an OPA profile", func(args LockModeArgs) (*mcp_golang.ToolResponse, error) {
+		return lockOPAProfile(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "sync-opa-profile", "Sync an OPA profile", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return syncOPAProfile(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "make-opa-profile-default", "Make an OPA profile default", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return makeOPAProfileDefault(taikunClient, args)
+	})
+
+	mustRegisterScopedTool(server, "list-alerting-profiles", "List alerting profiles", func(args SearchListArgs) (*mcp_golang.ToolResponse, error) {
+		return listAlertingProfiles(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "create-alerting-profile", "Create an alerting profile", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createAlertingProfile(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-alerting-profile", "Update an alerting profile", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return updateAlertingProfile(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "delete-alerting-profile", "Delete an alerting profile", func(args IDArgs) (*mcp_golang.ToolResponse, error) {
+		return deleteAlertingProfile(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "dropdown-alerting-profiles", "List alerting profile dropdown entries", func(args SearchListArgs) (*mcp_golang.ToolResponse, error) {
+		return dropdownAlertingProfiles(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "lock-alerting-profile", "Lock or unlock an alerting profile", func(args LockModeArgs) (*mcp_golang.ToolResponse, error) {
+		return lockAlertingProfile(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "attach-alerting-profile", "Attach an alerting profile to a project", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return attachAlertingProfile(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "detach-alerting-profile", "Detach an alerting profile from a project", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return detachAlertingProfile(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "assign-alerting-emails", "Assign alerting emails to a profile", func(args IDPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return assignAlertingEmails(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "assign-alerting-webhooks", "Assign alerting webhooks to a profile", func(args IDPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return assignAlertingWebhooks(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "verify-alerting-webhook", "Verify an alerting webhook", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return verifyAlertingWebhook(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "list-alerting-integrations", "List alerting integrations for a profile", func(args IDPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return listAlertingIntegrations(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "create-alerting-integration", "Create an alerting integration", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createAlertingIntegration(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-alerting-integration", "Update an alerting integration", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return updateAlertingIntegration(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "delete-alerting-integration", "Delete an alerting integration", func(args IDArgs) (*mcp_golang.ToolResponse, error) {
+		return deleteAlertingIntegration(taikunClient, args)
+	})
+
+	mustRegisterScopedTool(server, "list-backup-credentials", "List backup credentials", func(args SearchListArgs) (*mcp_golang.ToolResponse, error) {
+		return listBackupCredentials(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "create-backup-credential", "Create a backup credential", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createBackupCredential(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-backup-credential", "Update a backup credential", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return updateBackupCredential(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "delete-backup-credential", "Delete a backup credential", func(args IDArgs) (*mcp_golang.ToolResponse, error) {
+		return deleteBackupCredential(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "dropdown-backup-credentials", "List backup credential dropdown entries", func(args SearchListArgs) (*mcp_golang.ToolResponse, error) {
+		return dropdownBackupCredentials(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "make-backup-credential-default", "Make a backup credential default", func(args IDArgs) (*mcp_golang.ToolResponse, error) {
+		return makeBackupCredentialDefault(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "lock-backup-credential", "Lock or unlock a backup credential", func(args LockModeArgs) (*mcp_golang.ToolResponse, error) {
+		return lockBackupCredential(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "create-backup-policy", "Create a backup policy", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createBackupPolicy(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "get-backup-by-name", "Get backup details by project and name", func(args ProjectNameArgs) (*mcp_golang.ToolResponse, error) {
+		return getBackupByName(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "list-project-backups", "List backups for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
+		return listProjectBackups(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "list-project-restore-requests", "List restore requests for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
+		return listProjectRestoreRequests(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "list-project-backup-schedules", "List backup schedules for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
+		return listProjectBackupSchedules(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "list-project-backup-storage-locations", "List backup storage locations for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
+		return listProjectBackupStorageLocations(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "list-project-backup-delete-requests", "List backup delete requests for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
+		return listProjectBackupDeleteRequests(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "describe-backup", "Describe a backup by project and name", func(args ProjectNameArgs) (*mcp_golang.ToolResponse, error) {
+		return describeBackup(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "describe-restore", "Describe a restore by project and name", func(args ProjectNameArgs) (*mcp_golang.ToolResponse, error) {
+		return describeRestore(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "describe-schedule", "Describe a backup schedule by project and name", func(args ProjectNameArgs) (*mcp_golang.ToolResponse, error) {
+		return describeSchedule(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "delete-backup", "Delete a backup", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return deleteBackup(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "delete-backup-storage-location", "Delete a backup storage location", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return deleteBackupStorageLocation(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "delete-restore", "Delete a restore request", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return deleteRestore(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "delete-schedule", "Delete a backup schedule", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return deleteSchedule(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "import-backup-storage-location", "Import a backup storage location", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return importBackupStorageLocation(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "restore-backup", "Restore a backup", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return restoreBackup(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "enable-project-backup", "Enable backup for a project using a backup credential", func(args ProjectBackupCredentialArgs) (*mcp_golang.ToolResponse, error) {
+		return enableProjectBackup(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "disable-project-backup", "Disable backup for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
+		return disableProjectBackup(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "enable-project-monitoring", "Enable monitoring for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
+		return enableProjectMonitoring(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "disable-project-monitoring", "Disable monitoring for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
+		return disableProjectMonitoring(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "enable-project-ai-assistant", "Enable AI Assistant for a project using an AI credential", func(args ProjectAICredentialArgs) (*mcp_golang.ToolResponse, error) {
+		return enableProjectAIAssistant(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "disable-project-ai-assistant", "Disable AI Assistant for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
+		return disableProjectAIAssistant(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "enable-project-policy", "Enable policy enforcement for a project using a policy profile", func(args ProjectPolicyProfileArgs) (*mcp_golang.ToolResponse, error) {
+		return enableProjectPolicy(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "disable-project-policy", "Disable policy enforcement for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
+		return disableProjectPolicy(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "enable-project-full-spot", "Enable full spot support for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
+		return enableProjectFullSpot(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "disable-project-full-spot", "Disable full spot support for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
+		return disableProjectFullSpot(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "enable-project-spot-workers", "Enable spot workers for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
+		return enableProjectSpotWorkers(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "disable-project-spot-workers", "Disable spot workers for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
+		return disableProjectSpotWorkers(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "enable-project-spot-vms", "Enable spot VMs for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
+		return enableProjectSpotVMs(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "disable-project-spot-vms", "Disable spot VMs for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
+		return disableProjectSpotVMs(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "get-project-service-status", "Get current project service settings and bindings", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
+		return getProjectServiceStatus(taikunClient, args)
+	})
+
+	mustRegisterScopedTool(server, "list-images", "List images for a provider", func(args ImageListArgs) (*mcp_golang.ToolResponse, error) {
+		return listImages(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "get-image-details", "Get image details", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return getImageDetails(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "bind-images-to-project", "Bind images to a project. Primarily for standalone VM workflows; Kubernetes project deployment does not require image binding.", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return bindImagesToProject(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "unbind-images-from-project", "Unbind images from a project", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return unbindImagesFromProject(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "list-selected-project-images", "List selected images for a project", func(args ProjectSearchListArgs) (*mcp_golang.ToolResponse, error) {
+		return listSelectedProjectImages(taikunClient, args)
+	})
+
+	mustRegisterScopedTool(server, "enable-autoscaling", "Enable project autoscaling", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return enableAutoscaling(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-autoscaling", "Update project autoscaling", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return updateAutoscaling(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "disable-autoscaling", "Disable project autoscaling", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return disableAutoscaling(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "get-autoscaling-status", "Get project autoscaling status", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
+		return getAutoscalingStatus(taikunClient, args)
+	})
+
+	mustRegisterScopedTool(server, "list-standalone-vms", "List standalone VMs in a project", func(args ProjectSearchListArgs) (*mcp_golang.ToolResponse, error) {
+		return listStandaloneVMs(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "get-standalone-vm-details", "Get standalone VM details", func(args ProjectSearchListArgs) (*mcp_golang.ToolResponse, error) {
+		return getStandaloneVMDetails(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "create-standalone-vm", "Create a standalone VM", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createStandaloneVM(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-standalone-vm-flavor", "Update standalone VM flavor", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return updateStandaloneVMFlavor(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "manage-standalone-vm-ip", "Manage standalone VM IP assignment", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return manageStandaloneVMIP(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "reset-standalone-vm-status", "Reset standalone VM status", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return resetStandaloneVMStatus(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "get-standalone-vm-console", "Get standalone VM console information", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return getStandaloneVMConsole(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "download-standalone-vm-rdp", "Download standalone VM RDP content", func(args IDArgs) (*mcp_golang.ToolResponse, error) {
+		return downloadStandaloneVMRDP(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "reboot-standalone-vm", "Reboot a standalone VM", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return rebootStandaloneVM(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "shelve-standalone-vm", "Shelve a standalone VM", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return shelveStandaloneVM(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "start-standalone-vm", "Start a standalone VM", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return startStandaloneVM(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "get-standalone-vm-status", "Get standalone VM status", func(args IDArgs) (*mcp_golang.ToolResponse, error) {
+		return getStandaloneVMStatus(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "stop-standalone-vm", "Stop a standalone VM", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return stopStandaloneVM(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "unshelve-standalone-vm", "Unshelve a standalone VM", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return unshelveStandaloneVM(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "get-standalone-vm-windows-password", "Get standalone VM Windows password", func(args StandaloneWindowsPasswordArgs) (*mcp_golang.ToolResponse, error) {
+		return getStandaloneVMWindowsPassword(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "create-standalone-vm-disk", "Create a standalone VM disk", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createStandaloneVMDisk(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "resize-standalone-vm-disk", "Resize a standalone VM disk", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return resizeStandaloneVMDisk(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "list-standalone-profiles", "List standalone profiles", func(args SearchListArgs) (*mcp_golang.ToolResponse, error) {
+		return listStandaloneProfiles(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "create-standalone-profile", "Create a standalone profile", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createStandaloneProfile(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-standalone-profile", "Update a standalone profile", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return updateStandaloneProfile(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "delete-standalone-profile", "Delete a standalone profile", func(args IDArgs) (*mcp_golang.ToolResponse, error) {
+		return deleteStandaloneProfile(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "dropdown-standalone-profiles", "List standalone profile dropdown entries", func(args SearchListArgs) (*mcp_golang.ToolResponse, error) {
+		return dropdownStandaloneProfiles(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "lock-standalone-profile", "Lock or unlock a standalone profile", func(args LockModeArgs) (*mcp_golang.ToolResponse, error) {
+		return lockStandaloneProfile(taikunClient, args)
+	})
+
+	mustRegisterScopedTool(server, "create-aws-cloud-credential", "Create an AWS cloud credential", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createAWSCloudCredential(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-aws-cloud-credential", "Update an AWS cloud credential", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return updateAWSCloudCredential(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "create-azure-cloud-credential", "Create an Azure cloud credential", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createAzureCloudCredential(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-azure-cloud-credential", "Update an Azure cloud credential", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return updateAzureCloudCredential(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "create-openstack-cloud-credential", "Create an OpenStack cloud credential", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createOpenStackCloudCredential(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-openstack-cloud-credential", "Update an OpenStack cloud credential", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return updateOpenStackCloudCredential(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "create-proxmox-cloud-credential", "Create a Proxmox cloud credential", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createProxmoxCloudCredential(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-proxmox-cloud-credential", "Update a Proxmox cloud credential", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return updateProxmoxCloudCredential(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "create-vsphere-cloud-credential", "Create a vSphere cloud credential", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createVSphereCloudCredential(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-vsphere-cloud-credential", "Update a vSphere cloud credential", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return updateVSphereCloudCredential(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "create-zadara-cloud-credential", "Create a Zadara cloud credential", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createZadaraCloudCredential(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-zadara-cloud-credential", "Update a Zadara cloud credential", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return updateZadaraCloudCredential(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-generic-kubernetes-credential", "Update a generic Kubernetes cloud credential", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return updateGenericKubernetesCloudCredential(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "delete-cloud-credential", "Delete a cloud credential", func(args IDArgs) (*mcp_golang.ToolResponse, error) {
+		return deleteCloudCredential(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "make-cloud-credential-default", "Make a cloud credential default", func(args IDArgs) (*mcp_golang.ToolResponse, error) {
+		return makeCloudCredentialDefault(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "lock-cloud-credential", "Lock or unlock a cloud credential", func(args LockModeArgs) (*mcp_golang.ToolResponse, error) {
+		return lockCloudCredential(taikunClient, args)
+	})
 
 	logger.Println("All tools registered successfully. Starting MCP server...")
 	logger.Println("About to call server.Serve()...")

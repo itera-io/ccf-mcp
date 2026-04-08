@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/itera-io/taikungoclient"
@@ -16,6 +17,44 @@ type ListProjectsArgs struct {
 	Search              string `json:"search,omitempty" jsonschema:"description=Search term to filter results (optional)"`
 	HealthyOnly         bool   `json:"healthyOnly,omitempty" jsonschema:"description=Return only healthy projects (default: false)"`
 	VirtualClustersOnly bool   `json:"virtualClustersOnly,omitempty" jsonschema:"description=Return only virtual cluster projects (default: false)"`
+}
+
+func emptyProjectListResponse(message string) *mcp_golang.ToolResponse {
+	return createJSONResponse(ProjectListResponse{
+		Projects: []ProjectSummary{},
+		Total:    0,
+		Message:  message,
+	})
+}
+
+func listProjectsErrorResponse(httpResponse *http.Response, err error) *mcp_golang.ToolResponse {
+	apiErr := apiErrorInfoFromResponse(httpResponse, err)
+	if apiErr.isNotFound() {
+		return emptyProjectListResponse("No projects found")
+	}
+	return apiErr.toolResponse()
+}
+
+func waitForProjectLookupErrorResponse(waitDeleted bool, projectID int32, httpResponse *http.Response, err error) *mcp_golang.ToolResponse {
+	apiErr := apiErrorInfoFromResponse(httpResponse, err)
+	if waitDeleted && apiErr.isNotFound() {
+		return createJSONResponse(SuccessResponse{
+			Message: fmt.Sprintf("Project %d has been successfully deleted", projectID),
+			Success: true,
+		})
+	}
+	return apiErr.toolResponse()
+}
+
+func deleteProjectErrorResponse(projectID int32, httpResponse *http.Response, err error) *mcp_golang.ToolResponse {
+	apiErr := apiErrorInfoFromResponse(httpResponse, err)
+	if apiErr.contains("You can not delete non empty project") {
+		return createJSONResponse(ErrorResponse{
+			Error:   fmt.Sprintf("Project %d cannot be deleted until all servers are removed", projectID),
+			Details: apiErr.Message,
+		})
+	}
+	return apiErr.toolResponse()
 }
 
 func listProjects(client *taikungoclient.Client, args ListProjectsArgs) (*mcp_golang.ToolResponse, error) {
@@ -38,7 +77,7 @@ func listProjects(client *taikungoclient.Client, args ListProjectsArgs) (*mcp_go
 
 	projectList, httpResponse, err := req.Execute()
 	if err != nil {
-		return createError(httpResponse, err), nil
+		return listProjectsErrorResponse(httpResponse, err), nil
 	}
 
 	if errorResp := checkResponse(httpResponse, "list projects"); errorResp != nil {
@@ -46,12 +85,7 @@ func listProjects(client *taikungoclient.Client, args ListProjectsArgs) (*mcp_go
 	}
 
 	if projectList == nil || len(projectList.Data) == 0 {
-		listResp := ProjectListResponse{
-			Projects: []ProjectSummary{},
-			Total:    0,
-			Message:  "No projects found",
-		}
-		return createJSONResponse(listResp), nil
+		return emptyProjectListResponse("No projects found"), nil
 	}
 
 	var filteredProjects []taikuncore.ProjectListDetailDto
@@ -190,7 +224,7 @@ func createProject(client *taikungoclient.Client, args CreateProjectArgs) (*mcp_
 	if args.KubernetesVersion != "" {
 		createCmd.SetKubernetesVersion(args.KubernetesVersion)
 	}
-	
+
 	// Set monitoring
 	createCmd.SetIsMonitoringEnabled(args.Monitoring)
 
@@ -249,7 +283,7 @@ func deleteProject(client *taikungoclient.Client, args DeleteProjectArgs) (*mcp_
 		Execute()
 
 	if err != nil {
-		return createError(httpResponse, err), nil
+		return deleteProjectErrorResponse(args.ProjectID, httpResponse, err), nil
 	}
 
 	if errorResp := checkResponse(httpResponse, "delete project"); errorResp != nil {
@@ -298,7 +332,7 @@ func waitForProject(client *taikungoclient.Client, args WaitForProjectArgs) (*mc
 			request := client.Client.ProjectsAPI.ProjectsList(ctx).Id(args.ProjectId)
 			result, httpResponse, err := request.Execute()
 			if err != nil {
-				return createError(httpResponse, err), nil
+				return waitForProjectLookupErrorResponse(args.WaitDeleted, args.ProjectId, httpResponse, err), nil
 			}
 
 			if errorResp := checkResponse(httpResponse, "check project status"); errorResp != nil {
