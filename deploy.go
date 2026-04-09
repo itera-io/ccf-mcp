@@ -200,7 +200,7 @@ func commitProject(client *taikungoclient.Client, args CommitProjectArgs) (*mcp_
 	}
 
 	return createJSONResponse(map[string]string{
-		"message": fmt.Sprintf("Successfully committed project %d deployment. Note: Deploying a full Kubernetes cluster typically takes 10 to 30 minutes.", args.ProjectId),
+		"message": fmt.Sprintf("Successfully committed project %d deployment. Provisioning standalone VMs or other changes may take several minutes; an initial full Kubernetes cluster deploy often takes 10 to 30 minutes.", args.ProjectId),
 	}), nil
 }
 

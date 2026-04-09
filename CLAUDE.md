@@ -79,6 +79,7 @@ When unsure about API response fields:
 - **AWS LoadBalancer**: When creating LoadBalancer Services on AWS, set `service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: instance` to avoid ENI resolution issues with pod IP targets.
 - **Image Binding**: Binding images to a project is for standalone VM workflows. Kubernetes project deployment does not require `bind-images-to-project`, so do not treat image binding as a prerequisite for `commit-project` on Kubernetes clusters.
 - **Project Changes**: If you add servers to an already deployed project, you must run `commit-project` again to apply the changes.
+- **Standalone VMs**: After `create-standalone-vm` (or other standalone VM mutations such as disk or flavor changes), run `commit-project` for that project so changes are provisioned, unless your organization auto-commits.
 - **Project Status `Updating`**: Treat `Updating` as an ongoing commit or repair operation. Do not call `commit-project` again while a project is `Updating`; wait for it to settle into a terminal or steady state first.
 - **Sizing**: Minimal clusters (2 CPU / 2 GB RAM for bastion, master, and worker) should only be used for deployment tests and basic `kubectl` operations. For minimal workload clusters, use 2 CPU / 2 GB for bastion, 4 CPU / 4 GB for master, and 4 CPU / 8 GB for worker. Add workers or enable autoscaling based on workload.
 - **Virtual Clusters**: Agents can create virtual clusters within projects to isolate workloads while saving resources; ideal for testing and fast iteration.

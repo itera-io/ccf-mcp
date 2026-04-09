@@ -749,7 +749,7 @@ func main() {
 	}
 	logger.Println("Registered add-server-to-project tool")
 
-	err = registerScopedTool(server, "commit-project", "Commit and deploy a project. Note: Initial deployment takes 10-30 minutes; do not call this while the project status is Updating.", func(args CommitProjectArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "commit-project", "Commit and provision pending project infrastructure in the cloud (Kubernetes changes, standalone VM create/update, servers, etc.). After create-standalone-vm or other standalone VM mutations, call this with the same projectId so the VM is actually provisioned. Do not call while project status is Updating; full initial Kubernetes deploy often takes 10–30 minutes.", func(args CommitProjectArgs) (*mcp_golang.ToolResponse, error) {
 		return commitProject(taikunClient, args)
 	})
 	if err != nil {
@@ -1058,13 +1058,13 @@ func main() {
 	mustRegisterScopedTool(server, "get-standalone-vm-details", "Get standalone VM details", func(args ProjectSearchListArgs) (*mcp_golang.ToolResponse, error) {
 		return getStandaloneVMDetails(taikunClient, args)
 	})
-	mustRegisterScopedTool(server, "create-standalone-vm", "Create a standalone VM", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+	mustRegisterScopedTool(server, "create-standalone-vm", "Create a standalone VM (payload: CreateStandAloneVmCommand). After a successful create, call commit-project with the same projectId to provision the VM in the cloud; skip commit only if your org auto-applies changes.", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
 		return createStandaloneVM(taikunClient, args)
 	})
-	mustRegisterScopedTool(server, "update-standalone-vm-flavor", "Update standalone VM flavor", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+	mustRegisterScopedTool(server, "update-standalone-vm-flavor", "Update standalone VM flavor. Afterwards, call commit-project for that VM's project to apply the change.", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
 		return updateStandaloneVMFlavor(taikunClient, args)
 	})
-	mustRegisterScopedTool(server, "manage-standalone-vm-ip", "Manage standalone VM IP assignment", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+	mustRegisterScopedTool(server, "manage-standalone-vm-ip", "Manage standalone VM IP assignment. Afterwards, call commit-project for that VM's project if provisioning is required.", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
 		return manageStandaloneVMIP(taikunClient, args)
 	})
 	mustRegisterScopedTool(server, "reset-standalone-vm-status", "Reset standalone VM status", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
@@ -1097,10 +1097,10 @@ func main() {
 	mustRegisterScopedTool(server, "get-standalone-vm-windows-password", "Get standalone VM Windows password", func(args StandaloneWindowsPasswordArgs) (*mcp_golang.ToolResponse, error) {
 		return getStandaloneVMWindowsPassword(taikunClient, args)
 	})
-	mustRegisterScopedTool(server, "create-standalone-vm-disk", "Create a standalone VM disk", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+	mustRegisterScopedTool(server, "create-standalone-vm-disk", "Create a standalone VM disk. Afterwards, call commit-project for that VM's project to provision the change.", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
 		return createStandaloneVMDisk(taikunClient, args)
 	})
-	mustRegisterScopedTool(server, "resize-standalone-vm-disk", "Resize a standalone VM disk", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+	mustRegisterScopedTool(server, "resize-standalone-vm-disk", "Resize a standalone VM disk. Afterwards, call commit-project for that VM's project to provision the change.", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
 		return resizeStandaloneVMDisk(taikunClient, args)
 	})
 	mustRegisterScopedTool(server, "list-standalone-profiles", "List standalone profiles", func(args SearchListArgs) (*mcp_golang.ToolResponse, error) {
