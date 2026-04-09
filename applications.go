@@ -20,20 +20,20 @@ type AppParameter struct {
 }
 
 type InstallAppArgs struct {
-	Name              string         `json:"name" jsonschema:"required,description=The name of the application instance"`
-	Namespace         string         `json:"namespace" jsonschema:"required,description=The namespace to install the application in"`
-	ProjectID         int32          `json:"projectId" jsonschema:"required,description=The project ID to install the application in"`
-	CatalogAppID      int32          `json:"catalogAppId" jsonschema:"required,description=The catalog application ID to install"`
-	ExtraValues       string         `json:"extraValues,omitempty" jsonschema:"description=Base64-encoded YAML extra values for the application (optional)"`
-	AutoSync          bool           `json:"autoSync,omitempty" jsonschema:"description=Enable automatic synchronization (default: false)"`
-	TaikunLinkEnabled bool           `json:"taikunLinkEnabled,omitempty" jsonschema:"description=Enable Cloudera Cloud Factory (Taikun) link integration (default: false)"`
-	Timeout           int32          `json:"timeout,omitempty" jsonschema:"description=Installation timeout in seconds (optional)"`
-	Parameters        []AppParameter `json:"parameters,omitempty" jsonschema:"description=Application parameters as key-value pairs (optional)"`
-	UseCatalogDefaults *bool         `json:"useCatalogDefaults,omitempty" jsonschema:"description=Use catalog default parameters as a base (default: true)"`
-	WaitForReady      bool           `json:"waitForReady,omitempty" jsonschema:"description=Wait for application to be ready before returning (default: false)"`
-	WaitTimeout       int32          `json:"waitTimeout,omitempty" jsonschema:"description=Wait timeout in seconds (default: 600)"`
-	ReadyStabilizationSeconds int32  `json:"readyStabilizationSeconds,omitempty" jsonschema:"description=Seconds the app must remain in Ready state before success (default: 30)"`
-	RetrySyncOnFailure bool          `json:"retrySyncOnFailure,omitempty" jsonschema:"description=If wait detects Failed status, run one sync retry and wait again (default: false)"`
+	Name                      string         `json:"name" jsonschema:"required,description=The name of the application instance"`
+	Namespace                 string         `json:"namespace" jsonschema:"required,description=The namespace to install the application in"`
+	ProjectID                 int32          `json:"projectId" jsonschema:"required,description=The project ID to install the application in"`
+	CatalogAppID              int32          `json:"catalogAppId" jsonschema:"required,description=The catalog application ID to install"`
+	ExtraValues               string         `json:"extraValues,omitempty" jsonschema:"description=Base64-encoded YAML extra values for the application (optional)"`
+	AutoSync                  bool           `json:"autoSync,omitempty" jsonschema:"description=Enable automatic synchronization (default: false)"`
+	TaikunLinkEnabled         bool           `json:"taikunLinkEnabled,omitempty" jsonschema:"description=Enable Cloudera Cloud Factory (Taikun) link integration (default: false)"`
+	Timeout                   int32          `json:"timeout,omitempty" jsonschema:"description=Installation timeout in seconds (optional)"`
+	Parameters                []AppParameter `json:"parameters,omitempty" jsonschema:"description=Application parameters as key-value pairs (optional)"`
+	UseCatalogDefaults        *bool          `json:"useCatalogDefaults,omitempty" jsonschema:"description=Use catalog default parameters as a base (default: true)"`
+	WaitForReady              bool           `json:"waitForReady,omitempty" jsonschema:"description=Wait for application to be ready before returning (default: false)"`
+	WaitTimeout               int32          `json:"waitTimeout,omitempty" jsonschema:"description=Wait timeout in seconds (default: 600)"`
+	ReadyStabilizationSeconds int32          `json:"readyStabilizationSeconds,omitempty" jsonschema:"description=Seconds the app must remain in Ready state before success (default: 30)"`
+	RetrySyncOnFailure        bool           `json:"retrySyncOnFailure,omitempty" jsonschema:"description=If wait detects Failed status, run one sync retry and wait again (default: false)"`
 }
 
 type ListAppsArgs struct {
@@ -410,10 +410,6 @@ func listApps(client *taikungoclient.Client, args ListAppsArgs) (*mcp_golang.Too
 
 	appList, httpResponse, err := req.Execute()
 
-	if errorResp := checkResponse(httpResponse, "list applications"); errorResp != nil {
-		return errorResp, nil
-	}
-
 	// Prepare response data
 	type AppSummary struct {
 		ID         int32  `json:"id"`
@@ -430,6 +426,10 @@ func listApps(client *taikungoclient.Client, args ListAppsArgs) (*mcp_golang.Too
 	var applications []AppSummary
 
 	if err != nil {
+		if httpResponse == nil || httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
+			return createError(httpResponse, err), nil
+		}
+
 		// If unmarshaling failed, try to parse the raw body
 		if httpResponse != nil && httpResponse.Body != nil {
 			bodyBytes, readErr := io.ReadAll(httpResponse.Body)
@@ -458,6 +458,10 @@ func listApps(client *taikungoclient.Client, args ListAppsArgs) (*mcp_golang.Too
 			return createError(httpResponse, err), nil
 		}
 	} else {
+		if errorResp := checkResponse(httpResponse, "list applications"); errorResp != nil {
+			return errorResp, nil
+		}
+
 		if appList != nil && len(appList.Data) > 0 {
 			for _, app := range appList.Data {
 				appSummary := AppSummary{

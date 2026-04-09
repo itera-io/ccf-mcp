@@ -221,7 +221,9 @@ func getProjectDetails(client *taikungoclient.Client, args GetProjectDetailsArgs
 	}
 
 	if len(result.Data) == 0 {
-		return mcp_golang.NewToolResponse(mcp_golang.NewTextContent(fmt.Sprintf("Project with ID %d not found", args.ProjectId))), nil
+		return createJSONResponse(ErrorResponse{
+			Error: fmt.Sprintf("Project with ID %d not found", args.ProjectId),
+		}), nil
 	}
 
 	project := result.Data[0]

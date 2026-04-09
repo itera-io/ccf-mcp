@@ -822,23 +822,15 @@ func listRepositories(client *taikungoclient.Client, args ListRepositoriesArgs) 
 		repositories = append(repositories, repo)
 	}
 
-	// Apply pagination
+	// Apply deterministic ordering before pagination so offset/limit are stable.
 	total := len(repositories)
-	start := int(args.Offset)
-	end := start + int(args.Limit)
-
-	if args.Limit > 0 && start < total {
-		if end > total {
-			end = total
-		}
-		repositories = repositories[start:end]
-	} else if start >= total {
-		repositories = []string{}
-	}
+	repositories = sortAndPaginateStrings(repositories, args.Offset, args.Limit)
 
 	message := fmt.Sprintf("Found %d unique repositories", total)
-	if len(repositories) == 0 {
+	if total == 0 {
 		message = "No repositories found"
+	} else if len(repositories) == 0 {
+		message = fmt.Sprintf("No repositories found on the requested page (total matches: %d)", total)
 	}
 
 	listResp := struct {
@@ -857,27 +849,33 @@ func listRepositories(client *taikungoclient.Client, args ListRepositoriesArgs) 
 func listAvailablePackages(client *taikungoclient.Client, args ListAvailablePackagesArgs) (*mcp_golang.ToolResponse, error) {
 	ctx := context.Background()
 
-	// Use the PackageAPI to list all available packages
-	req := client.Client.PackageAPI.PackageList(ctx)
+	const pageSize int32 = 100
+	var allPackages []taikuncore.AvailablePackagesDto
+	for pageOffset := int32(0); ; pageOffset += pageSize {
+		req := client.Client.PackageAPI.PackageList(ctx).
+			Limit(pageSize).
+			Offset(pageOffset)
+		if args.Search != "" {
+			req = req.Search(args.Search)
+		}
 
-	if args.Limit > 0 {
-		req = req.Limit(args.Limit)
-	}
-	if args.Offset > 0 {
-		req = req.Offset(args.Offset)
-	}
-	if args.Search != "" {
-		req = req.Search(args.Search)
-	}
-	// Note: Repository filtering might need to be done client-side if not supported by API
+		packageList, response, err := req.Execute()
+		if err != nil {
+			return createError(response, err), nil
+		}
 
-	packageList, response, err := req.Execute()
-	if err != nil {
-		return createError(response, err), nil
-	}
+		if errorResp := checkResponse(response, "list available packages"); errorResp != nil {
+			return errorResp, nil
+		}
 
-	if errorResp := checkResponse(response, "list available packages"); errorResp != nil {
-		return errorResp, nil
+		if packageList == nil || len(packageList.Data) == 0 {
+			break
+		}
+
+		allPackages = append(allPackages, packageList.Data...)
+		if int32(len(packageList.Data)) < pageSize {
+			break
+		}
 	}
 
 	// Prepare response data
@@ -892,52 +890,52 @@ func listAvailablePackages(client *taikungoclient.Client, args ListAvailablePack
 	}
 
 	var packages []PackageInfo
-	if packageList != nil && len(packageList.Data) > 0 {
-		for _, pkg := range packageList.Data {
-			packageInfo := PackageInfo{}
+	for _, pkg := range allPackages {
+		packageInfo := PackageInfo{}
 
-			// Handle nullable/pointer fields safely using the IsSet() and Get() methods
-			if pkg.Name.IsSet() && pkg.Name.Get() != nil {
-				packageInfo.Name = *pkg.Name.Get()
-			}
-
-			if pkg.Repository != nil && pkg.Repository.Name.IsSet() && pkg.Repository.Name.Get() != nil {
-				packageInfo.Repository = *pkg.Repository.Name.Get()
-			}
-
-			if pkg.Version.IsSet() && pkg.Version.Get() != nil {
-				packageInfo.Version = *pkg.Version.Get()
-			}
-
-			if pkg.Description.IsSet() && pkg.Description.Get() != nil {
-				packageInfo.Description = *pkg.Description.Get()
-			}
-
-			if pkg.AppVersion.IsSet() && pkg.AppVersion.Get() != nil {
-				packageInfo.AppVersion = *pkg.AppVersion.Get()
-			}
-
-			if pkg.Stars != nil {
-				packageInfo.Stars = *pkg.Stars
-			}
-
-			if pkg.Deprecated != nil {
-				packageInfo.Deprecated = *pkg.Deprecated
-			}
-
-			// Apply repository filter client-side if specified
-			if args.Repository != "" && packageInfo.Repository != args.Repository {
-				continue
-			}
-
-			packages = append(packages, packageInfo)
+		// Handle nullable/pointer fields safely using the IsSet() and Get() methods
+		if pkg.Name.IsSet() && pkg.Name.Get() != nil {
+			packageInfo.Name = *pkg.Name.Get()
 		}
+
+		if pkg.Repository != nil && pkg.Repository.Name.IsSet() && pkg.Repository.Name.Get() != nil {
+			packageInfo.Repository = *pkg.Repository.Name.Get()
+		}
+
+		if pkg.Version.IsSet() && pkg.Version.Get() != nil {
+			packageInfo.Version = *pkg.Version.Get()
+		}
+
+		if pkg.Description.IsSet() && pkg.Description.Get() != nil {
+			packageInfo.Description = *pkg.Description.Get()
+		}
+
+		if pkg.AppVersion.IsSet() && pkg.AppVersion.Get() != nil {
+			packageInfo.AppVersion = *pkg.AppVersion.Get()
+		}
+
+		if pkg.Stars != nil {
+			packageInfo.Stars = *pkg.Stars
+		}
+
+		if pkg.Deprecated != nil {
+			packageInfo.Deprecated = *pkg.Deprecated
+		}
+
+		if args.Repository != "" && packageInfo.Repository != args.Repository {
+			continue
+		}
+
+		packages = append(packages, packageInfo)
 	}
 
 	total := len(packages)
+	packagedPage := applyOffsetLimit(packages, args.Offset, args.Limit)
 	message := fmt.Sprintf("Found %d available packages", total)
 	if total == 0 {
 		message = "No packages found"
+	} else if len(packagedPage) == 0 {
+		message = fmt.Sprintf("No packages found on the requested page (total matches: %d)", total)
 	}
 	if args.Repository != "" {
 		message += fmt.Sprintf(" in repository '%s'", args.Repository)
@@ -948,7 +946,7 @@ func listAvailablePackages(client *taikungoclient.Client, args ListAvailablePack
 		Total    int           `json:"total"`
 		Message  string        `json:"message"`
 	}{
-		Packages: packages,
+		Packages: packagedPage,
 		Total:    total,
 		Message:  message,
 	}
@@ -959,25 +957,33 @@ func listAvailablePackages(client *taikungoclient.Client, args ListAvailablePack
 func listAvailableApps(client *taikungoclient.Client, args ListAvailableAppsArgs) (*mcp_golang.ToolResponse, error) {
 	ctx := context.Background()
 
-	req := client.Client.PackageAPI.PackageList(ctx)
+	const pageSize int32 = 100
+	var allPackages []taikuncore.AvailablePackagesDto
+	for pageOffset := int32(0); ; pageOffset += pageSize {
+		req := client.Client.PackageAPI.PackageList(ctx).
+			Limit(pageSize).
+			Offset(pageOffset)
+		if args.Search != "" {
+			req = req.Search(args.Search)
+		}
 
-	if args.Limit > 0 {
-		req = req.Limit(args.Limit)
-	}
-	if args.Offset > 0 {
-		req = req.Offset(args.Offset)
-	}
-	if args.Search != "" {
-		req = req.Search(args.Search)
-	}
+		packageList, response, err := req.Execute()
+		if err != nil {
+			return createError(response, err), nil
+		}
 
-	packageList, response, err := req.Execute()
-	if err != nil {
-		return createError(response, err), nil
-	}
+		if errorResp := checkResponse(response, "list available apps"); errorResp != nil {
+			return errorResp, nil
+		}
 
-	if errorResp := checkResponse(response, "list available apps"); errorResp != nil {
-		return errorResp, nil
+		if packageList == nil || len(packageList.Data) == 0 {
+			break
+		}
+
+		allPackages = append(allPackages, packageList.Data...)
+		if int32(len(packageList.Data)) < pageSize {
+			break
+		}
 	}
 
 	type AvailableAppInfo struct {
@@ -995,55 +1001,57 @@ func listAvailableApps(client *taikungoclient.Client, args ListAvailableAppsArgs
 	}
 
 	var apps []AvailableAppInfo
-	if packageList != nil && len(packageList.Data) > 0 {
-		for _, pkg := range packageList.Data {
-			app := AvailableAppInfo{}
+	for _, pkg := range allPackages {
+		app := AvailableAppInfo{}
 
-			if value, ok := pkg.GetPackageIdOk(); ok && value != nil {
-				app.PackageID = *value
-			}
-			if value, ok := pkg.GetNameOk(); ok && value != nil {
-				app.Name = *value
-			}
-			if pkg.Repository != nil && pkg.Repository.Name.IsSet() && pkg.Repository.Name.Get() != nil {
-				app.Repository = *pkg.Repository.Name.Get()
-			}
-			if value, ok := pkg.GetVersionOk(); ok && value != nil {
-				app.Version = *value
-			}
-			if value, ok := pkg.GetAppVersionOk(); ok && value != nil {
-				app.AppVersion = *value
-			}
-			if value, ok := pkg.GetDescriptionOk(); ok && value != nil {
-				app.Description = *value
-			}
-			if value, ok := pkg.GetCatalogAppIdOk(); ok && value != nil {
-				app.CatalogAppID = *value
-			}
-			if value, ok := pkg.GetCatalogIdOk(); ok && value != nil {
-				app.CatalogID = *value
-			}
-			if value, ok := pkg.GetInstalledInstanceCountOk(); ok && value != nil {
-				app.InstalledCount = *value
-			}
-			if value, ok := pkg.GetIsAddedOk(); ok {
-				app.IsAdded = value
-			}
-			if pkg.Deprecated != nil {
-				app.Deprecated = pkg.Deprecated
-			}
-
-			if args.Repository != "" && app.Repository != args.Repository {
-				continue
-			}
-
-			apps = append(apps, app)
+		if value, ok := pkg.GetPackageIdOk(); ok && value != nil {
+			app.PackageID = *value
 		}
+		if value, ok := pkg.GetNameOk(); ok && value != nil {
+			app.Name = *value
+		}
+		if pkg.Repository != nil && pkg.Repository.Name.IsSet() && pkg.Repository.Name.Get() != nil {
+			app.Repository = *pkg.Repository.Name.Get()
+		}
+		if value, ok := pkg.GetVersionOk(); ok && value != nil {
+			app.Version = *value
+		}
+		if value, ok := pkg.GetAppVersionOk(); ok && value != nil {
+			app.AppVersion = *value
+		}
+		if value, ok := pkg.GetDescriptionOk(); ok && value != nil {
+			app.Description = *value
+		}
+		if value, ok := pkg.GetCatalogAppIdOk(); ok && value != nil {
+			app.CatalogAppID = *value
+		}
+		if value, ok := pkg.GetCatalogIdOk(); ok && value != nil {
+			app.CatalogID = *value
+		}
+		if value, ok := pkg.GetInstalledInstanceCountOk(); ok && value != nil {
+			app.InstalledCount = *value
+		}
+		if value, ok := pkg.GetIsAddedOk(); ok {
+			app.IsAdded = value
+		}
+		if pkg.Deprecated != nil {
+			app.Deprecated = pkg.Deprecated
+		}
+
+		if args.Repository != "" && app.Repository != args.Repository {
+			continue
+		}
+
+		apps = append(apps, app)
 	}
 
-	message := fmt.Sprintf("Found %d available apps", len(apps))
-	if len(apps) == 0 {
+	total := len(apps)
+	appPage := applyOffsetLimit(apps, args.Offset, args.Limit)
+	message := fmt.Sprintf("Found %d available apps", total)
+	if total == 0 {
 		message = "No available apps found"
+	} else if len(appPage) == 0 {
+		message = fmt.Sprintf("No available apps found on the requested page (total matches: %d)", total)
 	}
 	if args.Repository != "" {
 		message += fmt.Sprintf(" in repository '%s'", args.Repository)
@@ -1054,8 +1062,8 @@ func listAvailableApps(client *taikungoclient.Client, args ListAvailableAppsArgs
 		Total   int                `json:"total"`
 		Message string             `json:"message"`
 	}{
-		Apps:    apps,
-		Total:   len(apps),
+		Apps:    appPage,
+		Total:   total,
 		Message: message,
 	}
 

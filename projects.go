@@ -60,57 +60,66 @@ func deleteProjectErrorResponse(projectID int32, httpResponse *http.Response, er
 func listProjects(client *taikungoclient.Client, args ListProjectsArgs) (*mcp_golang.ToolResponse, error) {
 	ctx := context.Background()
 
-	req := client.Client.ProjectsAPI.ProjectsList(ctx)
-
-	if args.Limit > 0 {
-		req = req.Limit(args.Limit)
-	}
-	if args.Offset > 0 {
-		req = req.Offset(args.Offset)
-	}
-	if args.Search != "" {
-		req = req.Search(args.Search)
-	}
-	if args.HealthyOnly {
-		req = req.Healthy(true)
-	}
-
-	projectList, httpResponse, err := req.Execute()
-	if err != nil {
-		return listProjectsErrorResponse(httpResponse, err), nil
-	}
-
-	if errorResp := checkResponse(httpResponse, "list projects"); errorResp != nil {
-		return errorResp, nil
-	}
-
-	if projectList == nil || len(projectList.Data) == 0 {
-		return emptyProjectListResponse("No projects found"), nil
-	}
+	const pageSize int32 = 100
 
 	var filteredProjects []taikuncore.ProjectListDetailDto
+	for pageOffset := int32(0); ; pageOffset += pageSize {
+		req := client.Client.ProjectsAPI.ProjectsList(ctx).
+			Limit(pageSize).
+			Offset(pageOffset)
 
-	for _, project := range projectList.Data {
-		include := true
-
-		// Always filter to Kubernetes projects only
-		if !project.GetIsKubernetes() {
-			include = false
+		if args.Search != "" {
+			req = req.Search(args.Search)
+		}
+		if args.HealthyOnly {
+			req = req.Healthy(true)
 		}
 
-		// Filter by virtual clusters if requested
-		if args.VirtualClustersOnly && !project.GetIsVirtualCluster() {
-			include = false
+		projectList, httpResponse, err := req.Execute()
+		if err != nil {
+			return listProjectsErrorResponse(httpResponse, err), nil
 		}
 
-		if include {
-			filteredProjects = append(filteredProjects, project)
+		if errorResp := checkResponse(httpResponse, "list projects"); errorResp != nil {
+			return errorResp, nil
+		}
+
+		if projectList == nil || len(projectList.Data) == 0 {
+			break
+		}
+
+		for _, project := range projectList.Data {
+			include := true
+
+			// Always filter to Kubernetes projects only.
+			if !project.GetIsKubernetes() {
+				include = false
+			}
+
+			// Filter by virtual clusters if requested.
+			if args.VirtualClustersOnly && !project.GetIsVirtualCluster() {
+				include = false
+			}
+
+			if include {
+				filteredProjects = append(filteredProjects, project)
+			}
+		}
+
+		if int32(len(projectList.Data)) < pageSize || pageOffset+pageSize >= projectList.GetTotalCount() {
+			break
 		}
 	}
 
-	// Prepare the response data
+	if len(filteredProjects) == 0 {
+		return emptyProjectListResponse("No projects found matching the specified criteria"), nil
+	}
+
+	pagedProjects := applyOffsetLimit(filteredProjects, args.Offset, args.Limit)
+
+	// Prepare the response data.
 	var projects []ProjectSummary
-	for _, project := range filteredProjects {
+	for _, project := range pagedProjects {
 		projectSummary := ProjectSummary{
 			ID:                     project.GetId(),
 			Name:                   project.GetName(),
@@ -147,19 +156,19 @@ func listProjects(client *taikungoclient.Client, args ListProjectsArgs) (*mcp_go
 	var message string
 	if args.VirtualClustersOnly {
 		filterType = "virtual-clusters"
-		message = fmt.Sprintf("Found %d virtual cluster projects", len(projects))
+		message = fmt.Sprintf("Found %d virtual cluster projects", len(filteredProjects))
 	} else {
 		filterType = "kubernetes"
-		message = fmt.Sprintf("Found %d Kubernetes projects", len(projects))
+		message = fmt.Sprintf("Found %d Kubernetes projects", len(filteredProjects))
 	}
 
 	if len(projects) == 0 {
-		message = "No projects found matching the specified criteria"
+		message = fmt.Sprintf("No projects found on the requested page (total matches: %d)", len(filteredProjects))
 	}
 
 	response := ProjectListResponse{
 		Projects:   projects,
-		Total:      len(projects),
+		Total:      len(filteredProjects),
 		FilterType: filterType,
 		Message:    message,
 	}

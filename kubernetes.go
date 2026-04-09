@@ -1123,7 +1123,9 @@ func deleteKubernetesResource(client *taikungoclient.Client, args DeleteKubernet
 
 	kind, err := taikuncore.NewEKubernetesResourceFromValue(args.Kind)
 	if err != nil {
-		return mcp_golang.NewToolResponse(mcp_golang.NewTextContent(fmt.Sprintf("Invalid resource kind: %s", args.Kind))), nil
+		return createJSONResponse(ErrorResponse{
+			Error: fmt.Sprintf("Invalid resource kind: %s", args.Kind),
+		}), nil
 	}
 
 	// Create the action request with name and namespace

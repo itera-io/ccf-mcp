@@ -350,17 +350,17 @@ func checkResponse(response *http.Response, operation string) *mcp_golang.ToolRe
 	if response == nil {
 		errorMsg := fmt.Sprintf("No response received for %s", operation)
 		logger.Printf("Error: %s", errorMsg)
-		return mcp_golang.NewToolResponse(
-			mcp_golang.NewTextContent(errorMsg),
-		)
+		return createJSONResponse(ErrorResponse{
+			Error: errorMsg,
+		})
 	}
 
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		errorMsg := fmt.Sprintf("Failed to %s. HTTP Status: %d", operation, response.StatusCode)
 		logger.Printf("Error: %s", errorMsg)
-		return mcp_golang.NewToolResponse(
-			mcp_golang.NewTextContent(errorMsg),
-		)
+		return createJSONResponse(ErrorResponse{
+			Error: errorMsg,
+		})
 	}
 
 	return nil
