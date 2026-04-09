@@ -38,8 +38,8 @@ func TestCheckResponseReturnsJSONError(t *testing.T) {
 	response := checkResponse(fakeHTTPErrorResponse(http.StatusBadGateway, `{"detail":"upstream failed"}`), "list projects")
 
 	result := decodeToolResponseJSON[ErrorResponse](t, response)
-	if !strings.Contains(result.Error, "HTTP Status: 502") {
-		t.Fatalf("expected JSON error with status code, got %+v", result)
+	if !strings.Contains(result.Error, "upstream failed") || !strings.Contains(result.Error, "HTTP 502") {
+		t.Fatalf("expected detailed JSON API error, got %+v", result)
 	}
 }
 

@@ -190,6 +190,11 @@ type DeleteProjectArgs struct {
 	ProjectID int32 `json:"projectId" jsonschema:"required,description=ID of the project to delete"`
 }
 
+type DeleteStandaloneVMArgs struct {
+	ProjectID int32 `json:"projectId" jsonschema:"required,description=Project ID containing the standalone VM"`
+	VMID      int32 `json:"vmId" jsonschema:"required,description=Standalone VM ID to delete"`
+}
+
 type RemoveAppFromCatalogArgs struct {
 	CatalogID   int32  `json:"catalogId" jsonschema:"required,description=The catalog ID to remove the application from"`
 	Repository  string `json:"repository,omitempty" jsonschema:"description=Repository name (optional - if not provided, will search by package name only)"`
@@ -356,11 +361,7 @@ func checkResponse(response *http.Response, operation string) *mcp_golang.ToolRe
 	}
 
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		errorMsg := fmt.Sprintf("Failed to %s. HTTP Status: %d", operation, response.StatusCode)
-		logger.Printf("Error: %s", errorMsg)
-		return createJSONResponse(ErrorResponse{
-			Error: errorMsg,
-		})
+		return apiErrorInfoFromResponse(response, nil).toolResponse()
 	}
 
 	return nil
@@ -1058,13 +1059,16 @@ func main() {
 	mustRegisterScopedTool(server, "get-standalone-vm-details", "Get standalone VM details", func(args ProjectSearchListArgs) (*mcp_golang.ToolResponse, error) {
 		return getStandaloneVMDetails(taikunClient, args)
 	})
-	mustRegisterScopedTool(server, "create-standalone-vm", "Create a standalone VM (payload: CreateStandAloneVmCommand). After a successful create, call commit-project with the same projectId to provision the VM in the cloud; skip commit only if your org auto-applies changes.", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+	mustRegisterScopedTool(server, "create-standalone-vm", "Create a standalone VM (payload: CreateStandAloneVmCommand). You can batch multiple VM changes and then call commit-project once for the project; for VM-only projects, commit-project automatically falls back to the VM commit endpoint used by the UI when needed.", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
 		return createStandaloneVM(taikunClient, args)
 	})
-	mustRegisterScopedTool(server, "update-standalone-vm-flavor", "Update standalone VM flavor. Afterwards, call commit-project for that VM's project to apply the change.", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+	mustRegisterScopedTool(server, "delete-standalone-vm", "Queue deletion of a standalone VM from a project. You can batch this with other VM changes and then call commit-project once for the project to apply the deletion.", func(args DeleteStandaloneVMArgs) (*mcp_golang.ToolResponse, error) {
+		return deleteStandaloneVM(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-standalone-vm-flavor", "Update standalone VM flavor. You can batch this with other VM changes and then call commit-project once for the project.", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
 		return updateStandaloneVMFlavor(taikunClient, args)
 	})
-	mustRegisterScopedTool(server, "manage-standalone-vm-ip", "Manage standalone VM IP assignment. Afterwards, call commit-project for that VM's project if provisioning is required.", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+	mustRegisterScopedTool(server, "manage-standalone-vm-ip", "Manage standalone VM IP assignment. You can batch this with other VM changes and then call commit-project once for the project.", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
 		return manageStandaloneVMIP(taikunClient, args)
 	})
 	mustRegisterScopedTool(server, "reset-standalone-vm-status", "Reset standalone VM status", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
@@ -1097,10 +1101,10 @@ func main() {
 	mustRegisterScopedTool(server, "get-standalone-vm-windows-password", "Get standalone VM Windows password", func(args StandaloneWindowsPasswordArgs) (*mcp_golang.ToolResponse, error) {
 		return getStandaloneVMWindowsPassword(taikunClient, args)
 	})
-	mustRegisterScopedTool(server, "create-standalone-vm-disk", "Create a standalone VM disk. Afterwards, call commit-project for that VM's project to provision the change.", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+	mustRegisterScopedTool(server, "create-standalone-vm-disk", "Create a standalone VM disk. You can batch this with other VM changes and then call commit-project once for the project.", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
 		return createStandaloneVMDisk(taikunClient, args)
 	})
-	mustRegisterScopedTool(server, "resize-standalone-vm-disk", "Resize a standalone VM disk. Afterwards, call commit-project for that VM's project to provision the change.", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+	mustRegisterScopedTool(server, "resize-standalone-vm-disk", "Resize a standalone VM disk. You can batch this with other VM changes and then call commit-project once for the project.", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
 		return resizeStandaloneVMDisk(taikunClient, args)
 	})
 	mustRegisterScopedTool(server, "list-standalone-profiles", "List standalone profiles", func(args SearchListArgs) (*mcp_golang.ToolResponse, error) {
@@ -1120,6 +1124,15 @@ func main() {
 	})
 	mustRegisterScopedTool(server, "lock-standalone-profile", "Lock or unlock a standalone profile", func(args LockModeArgs) (*mcp_golang.ToolResponse, error) {
 		return lockStandaloneProfile(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "create-standalone-profile-sg", "Create a security group rule for a standalone profile", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createStandaloneProfileSecurityGroup(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-standalone-profile-sg", "Update a security group rule for a standalone profile", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return updateStandaloneProfileSecurityGroup(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "delete-standalone-profile-sg", "Delete a security group rule from a standalone profile", func(args IDArgs) (*mcp_golang.ToolResponse, error) {
+		return deleteStandaloneProfileSecurityGroup(taikunClient, args)
 	})
 
 	mustRegisterScopedTool(server, "create-aws-cloud-credential", "Create an AWS cloud credential", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {

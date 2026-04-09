@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -182,44 +183,73 @@ func addServerToProject(client *taikungoclient.Client, args AddServerArgs) (*mcp
 }
 
 func commitProject(client *taikungoclient.Client, args CommitProjectArgs) (*mcp_golang.ToolResponse, error) {
+	result, errorInfo := commitProjectWithFallback(client, args.ProjectId)
+	if errorInfo != nil {
+		return errorInfo.toolResponse(), nil
+	}
+
+	return createJSONResponse(map[string]interface{}{
+		"message":    result.Message,
+		"success":    true,
+		"commitMode": result.Mode,
+	}), nil
+}
+
+type projectCommitResult struct {
+	Mode    string
+	Message string
+}
+
+func commitProjectWithFallback(client *taikungoclient.Client, projectID int32) (projectCommitResult, *apiErrorInfo) {
 	ctx := context.Background()
 
 	command := taikuncore.NewProjectDeploymentCommitCommand()
-	command.SetProjectId(args.ProjectId)
+	command.SetProjectId(projectID)
 
-	request := client.Client.ProjectDeploymentAPI.ProjectDeploymentCommit(ctx).
-		ProjectDeploymentCommitCommand(*command)
+	httpResponse, err := client.Client.ProjectDeploymentAPI.ProjectDeploymentCommit(ctx).
+		ProjectDeploymentCommitCommand(*command).
+		Execute()
 
-	httpResponse, err := request.Execute()
-	if err != nil {
-		if commitProjectNeedsVMEndpoint(err) {
-			vmCommand := taikuncore.NewDeploymentCommitVmCommand()
-			vmCommand.SetProjectId(args.ProjectId)
-
-			vmResponse, vmErr := client.Client.ProjectDeploymentAPI.ProjectDeploymentCommitVm(ctx).
-				DeploymentCommitVmCommand(*vmCommand).
-				Execute()
-			if vmErr != nil {
-				return createError(vmResponse, vmErr), nil
-			}
-			if errorResp := checkResponse(vmResponse, "commit project VM changes"); errorResp != nil {
-				return errorResp, nil
-			}
-
-			return createJSONResponse(map[string]string{
-				"message": fmt.Sprintf("Successfully committed VM changes for project %d. Provisioning standalone VMs may take several minutes.", args.ProjectId),
-			}), nil
+	if shouldUseVMCommit, errorInfo := commitProjectFallbackDecision(httpResponse, err); errorInfo != nil {
+		if shouldUseVMCommit {
+			return commitProjectVMChanges(client, projectID)
 		}
-		return createError(httpResponse, err), nil
+		return projectCommitResult{}, errorInfo
 	}
 
-	if errorResp := checkResponse(httpResponse, "commit project"); errorResp != nil {
-		return errorResp, nil
+	return projectCommitResult{
+		Mode:    "project",
+		Message: fmt.Sprintf("Successfully committed project %d deployment. Provisioning standalone VMs or other changes may take several minutes; an initial full Kubernetes cluster deploy often takes 10 to 30 minutes.", projectID),
+	}, nil
+}
+
+func commitProjectVMChanges(client *taikungoclient.Client, projectID int32) (projectCommitResult, *apiErrorInfo) {
+	ctx := context.Background()
+
+	vmCommand := taikuncore.NewDeploymentCommitVmCommand()
+	vmCommand.SetProjectId(projectID)
+
+	httpResponse, err := client.Client.ProjectDeploymentAPI.ProjectDeploymentCommitVm(ctx).
+		DeploymentCommitVmCommand(*vmCommand).
+		Execute()
+
+	if _, errorInfo := commitProjectFallbackDecision(httpResponse, err); errorInfo != nil {
+		return projectCommitResult{}, errorInfo
 	}
 
-	return createJSONResponse(map[string]string{
-		"message": fmt.Sprintf("Successfully committed project %d deployment. Provisioning standalone VMs or other changes may take several minutes; an initial full Kubernetes cluster deploy often takes 10 to 30 minutes.", args.ProjectId),
-	}), nil
+	return projectCommitResult{
+		Mode:    "vm",
+		Message: fmt.Sprintf("Successfully committed VM changes for project %d. Provisioning standalone VMs may take several minutes.", projectID),
+	}, nil
+}
+
+func commitProjectFallbackDecision(httpResponse *http.Response, err error) (bool, *apiErrorInfo) {
+	if err == nil && httpResponse != nil && httpResponse.StatusCode >= 200 && httpResponse.StatusCode < 300 {
+		return false, nil
+	}
+
+	errorInfo := apiErrorInfoFromResponse(httpResponse, err)
+	return commitProjectNeedsVMMessage(errorInfo.Message), &errorInfo
 }
 
 func commitProjectNeedsVMEndpoint(err error) bool {
@@ -227,7 +257,11 @@ func commitProjectNeedsVMEndpoint(err error) bool {
 		return false
 	}
 
-	msg := strings.ToLower(err.Error())
+	return commitProjectNeedsVMMessage(err.Error())
+}
+
+func commitProjectNeedsVMMessage(message string) bool {
+	msg := strings.ToLower(message)
 	return strings.Contains(msg, "at least one worker") &&
 		strings.Contains(msg, "one bastion") &&
 		strings.Contains(msg, "master")

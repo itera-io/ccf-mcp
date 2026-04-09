@@ -201,6 +201,13 @@ func TestArgumentStructs(t *testing.T) {
 			},
 		},
 		{
+			name: "DeleteStandaloneVMArgs",
+			data: DeleteStandaloneVMArgs{
+				ProjectID: 123,
+				VMID:      456,
+			},
+		},
+		{
 			name: "ListCatalogAppsArgs",
 			data: ListCatalogAppsArgs{
 				CatalogID: 123,

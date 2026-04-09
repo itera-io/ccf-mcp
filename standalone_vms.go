@@ -104,6 +104,29 @@ func createStandaloneVM(client *taikungoclient.Client, args JSONPayloadArgs) (*m
 	return finalizeAPIOperation(apiResp, httpResponse, err, "create standalone VM", "Standalone VM created successfully")
 }
 
+func deleteStandaloneVM(client *taikungoclient.Client, args DeleteStandaloneVMArgs) (*mcp_golang.ToolResponse, error) {
+	command := taikuncore.NewProjectDeploymentDeleteVmsCommand()
+	command.SetProjectId(args.ProjectID)
+	command.SetVmIds([]int32{args.VMID})
+
+	httpResponse, err := client.Client.ProjectDeploymentAPI.ProjectDeploymentDeleteVms(context.Background()).
+		ProjectDeploymentDeleteVmsCommand(*command).
+		Execute()
+	if err != nil {
+		return createError(httpResponse, err), nil
+	}
+	if errorResp := checkResponse(httpResponse, "delete standalone VM"); errorResp != nil {
+		return errorResp, nil
+	}
+
+	return createJSONResponse(map[string]interface{}{
+		"message":   fmt.Sprintf("Standalone VM %d marked for deletion from project %d. Call commit-project to apply the deletion.", args.VMID, args.ProjectID),
+		"success":   true,
+		"projectId": args.ProjectID,
+		"vmId":      args.VMID,
+	}), nil
+}
+
 func updateStandaloneVMFlavor(client *taikungoclient.Client, args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
 	command, errorResp := decodePayload[taikuncore.UpdateStandAloneVmFlavorCommand](args.Payload)
 	if errorResp != nil {
