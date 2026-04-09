@@ -192,6 +192,24 @@ func commitProject(client *taikungoclient.Client, args CommitProjectArgs) (*mcp_
 
 	httpResponse, err := request.Execute()
 	if err != nil {
+		if commitProjectNeedsVMEndpoint(err) {
+			vmCommand := taikuncore.NewDeploymentCommitVmCommand()
+			vmCommand.SetProjectId(args.ProjectId)
+
+			vmResponse, vmErr := client.Client.ProjectDeploymentAPI.ProjectDeploymentCommitVm(ctx).
+				DeploymentCommitVmCommand(*vmCommand).
+				Execute()
+			if vmErr != nil {
+				return createError(vmResponse, vmErr), nil
+			}
+			if errorResp := checkResponse(vmResponse, "commit project VM changes"); errorResp != nil {
+				return errorResp, nil
+			}
+
+			return createJSONResponse(map[string]string{
+				"message": fmt.Sprintf("Successfully committed VM changes for project %d. Provisioning standalone VMs may take several minutes.", args.ProjectId),
+			}), nil
+		}
 		return createError(httpResponse, err), nil
 	}
 
@@ -202,6 +220,17 @@ func commitProject(client *taikungoclient.Client, args CommitProjectArgs) (*mcp_
 	return createJSONResponse(map[string]string{
 		"message": fmt.Sprintf("Successfully committed project %d deployment. Provisioning standalone VMs or other changes may take several minutes; an initial full Kubernetes cluster deploy often takes 10 to 30 minutes.", args.ProjectId),
 	}), nil
+}
+
+func commitProjectNeedsVMEndpoint(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "at least one worker") &&
+		strings.Contains(msg, "one bastion") &&
+		strings.Contains(msg, "master")
 }
 
 func getProjectDetails(client *taikungoclient.Client, args GetProjectDetailsArgs) (*mcp_golang.ToolResponse, error) {

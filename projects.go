@@ -12,13 +12,11 @@ import (
 )
 
 type ListProjectsArgs struct {
-	Limit                  int32  `json:"limit,omitempty" jsonschema:"description=Maximum number of results to return (optional)"`
-	Offset                 int32  `json:"offset,omitempty" jsonschema:"description=Number of results to skip (optional)"`
-	Search                 string `json:"search,omitempty" jsonschema:"description=Search term to filter results (optional)"`
-	HealthyOnly            bool   `json:"healthyOnly,omitempty" jsonschema:"description=Return only healthy projects (default: false)"`
-	KubernetesOnly         bool   `json:"kubernetesOnly,omitempty" jsonschema:"description=Return only projects with API isKubernetes true (default: false lists all projects)"`
-	VirtualClustersOnly    bool   `json:"virtualClustersOnly,omitempty" jsonschema:"description=Return only virtual cluster projects (default: false)"`
-	StandaloneProjectsOnly bool   `json:"standaloneProjectsOnly,omitempty" jsonschema:"description=Return only non-Kubernetes projects (API isKubernetes false; VM-only type; default: false)"`
+	Limit               int32  `json:"limit,omitempty" jsonschema:"description=Maximum number of results to return (optional)"`
+	Offset              int32  `json:"offset,omitempty" jsonschema:"description=Number of results to skip (optional)"`
+	Search              string `json:"search,omitempty" jsonschema:"description=Search term to filter results (optional)"`
+	HealthyOnly         bool   `json:"healthyOnly,omitempty" jsonschema:"description=Return only healthy projects (default: false)"`
+	VirtualClustersOnly bool   `json:"virtualClustersOnly,omitempty" jsonschema:"description=Return only virtual cluster projects (default: false)"`
 }
 
 func emptyProjectListResponse(message string) *mcp_golang.ToolResponse {
@@ -93,12 +91,6 @@ func listProjects(client *taikungoclient.Client, args ListProjectsArgs) (*mcp_go
 		for _, project := range projectList.Data {
 			include := true
 
-			if args.KubernetesOnly && !project.GetIsKubernetes() {
-				include = false
-			}
-			if args.StandaloneProjectsOnly && project.GetIsKubernetes() {
-				include = false
-			}
 			if args.VirtualClustersOnly && !project.GetIsVirtualCluster() {
 				include = false
 			}
@@ -156,17 +148,10 @@ func listProjects(client *taikungoclient.Client, args ListProjectsArgs) (*mcp_go
 	// Create response
 	var filterType string
 	var message string
-	switch {
-	case args.StandaloneProjectsOnly:
-		filterType = "non-kubernetes"
-		message = fmt.Sprintf("Found %d non-Kubernetes projects", len(filteredProjects))
-	case args.VirtualClustersOnly:
+	if args.VirtualClustersOnly {
 		filterType = "virtual-clusters"
 		message = fmt.Sprintf("Found %d virtual cluster projects", len(filteredProjects))
-	case args.KubernetesOnly:
-		filterType = "kubernetes"
-		message = fmt.Sprintf("Found %d Kubernetes projects", len(filteredProjects))
-	default:
+	} else {
 		filterType = "all"
 		message = fmt.Sprintf("Found %d projects", len(filteredProjects))
 	}
@@ -186,10 +171,10 @@ func listProjects(client *taikungoclient.Client, args ListProjectsArgs) (*mcp_go
 }
 
 func getProjectType(project taikuncore.ProjectListDetailDto) string {
-	if project.GetIsKubernetes() {
-		return "Kubernetes"
+	if project.GetIsVirtualCluster() {
+		return "VirtualCluster"
 	}
-	return "Standalone"
+	return "Project"
 }
 
 func isProjectReadyForVirtualCluster(project taikuncore.ProjectListDetailDto) bool {
@@ -226,24 +211,18 @@ func createProject(client *taikungoclient.Client, args CreateProjectArgs) (*mcp_
 	createCmd := taikuncore.NewCreateProjectCommand()
 	createCmd.SetName(args.Name)
 	createCmd.SetCloudCredentialId(args.CloudCredentialID)
+	createCmd.SetIsKubernetes(true)
 
-	isKubernetes := !args.Standalone
-	createCmd.SetIsKubernetes(isKubernetes)
-
-	// Set optional parameters (Kubernetes-only fields omitted for standalone projects)
-	if isKubernetes {
-		if args.KubernetesProfileID != 0 {
-			createCmd.SetKubernetesProfileId(args.KubernetesProfileID)
-		}
-		if args.KubernetesVersion != "" {
-			createCmd.SetKubernetesVersion(args.KubernetesVersion)
-		}
+	if args.KubernetesProfileID != 0 {
+		createCmd.SetKubernetesProfileId(args.KubernetesProfileID)
+	}
+	if args.KubernetesVersion != "" {
+		createCmd.SetKubernetesVersion(args.KubernetesVersion)
 	}
 	if args.AlertingProfileID != 0 {
 		createCmd.SetAlertingProfileId(args.AlertingProfileID)
 	}
 
-	// Set monitoring
 	createCmd.SetIsMonitoringEnabled(args.Monitoring)
 
 	// Execute the API call
@@ -279,7 +258,7 @@ func createProject(client *taikungoclient.Client, args CreateProjectArgs) (*mcp_
 		ID:                projectID,
 		Name:              args.Name,
 		CloudCredentialID: args.CloudCredentialID,
-		IsKubernetes:      isKubernetes,
+		IsKubernetes:      true,
 		MonitoringEnabled: args.Monitoring,
 		Message:           fmt.Sprintf("Project '%s' created successfully with ID %s", args.Name, projectID),
 		Success:           true,
