@@ -180,10 +180,11 @@ type ListAvailablePackagesArgs struct {
 type CreateProjectArgs struct {
 	Name                string `json:"name" jsonschema:"required,description=Project name (3-30 characters, alphanumeric with hyphens)"`
 	CloudCredentialID   int32  `json:"cloudCredentialId" jsonschema:"required,description=ID of the cloud credential to use for this project"`
-	KubernetesProfileID int32  `json:"kubernetesProfileId,omitempty" jsonschema:"description=ID of the Kubernetes profile to use (optional)"`
+	Standalone          bool   `json:"standalone,omitempty" jsonschema:"description=If true, create a non-Kubernetes (VM-focused) project so commit-project applies standalone VMs without a full cluster layout; if false (default), create a Kubernetes project"`
+	KubernetesProfileID int32  `json:"kubernetesProfileId,omitempty" jsonschema:"description=ID of the Kubernetes profile to use (optional; Kubernetes projects only)"`
 	AlertingProfileID   int32  `json:"alertingProfileId,omitempty" jsonschema:"description=ID of the alerting profile to use (optional)"`
 	Monitoring          bool   `json:"monitoring,omitempty" jsonschema:"description=Enable monitoring for this project (default: false)"`
-	KubernetesVersion   string `json:"kubernetesVersion,omitempty" jsonschema:"description=Kubernetes version to install (optional)"`
+	KubernetesVersion   string `json:"kubernetesVersion,omitempty" jsonschema:"description=Kubernetes version to install (optional; Kubernetes projects only)"`
 }
 
 type DeleteProjectArgs struct {
@@ -629,7 +630,7 @@ func main() {
 	}
 	logger.Println("Registered wait-for-app tool")
 
-	err = registerScopedTool(server, "list-projects", "List Kubernetes projects with optional virtual cluster filtering", func(args ListProjectsArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "list-projects", "List projects (all by default). Kubernetes projects may host standalone VMs; use kubernetesOnly or standaloneProjectsOnly (non-Kubernetes / VM-only) or virtualClustersOnly to narrow results", func(args ListProjectsArgs) (*mcp_golang.ToolResponse, error) {
 		return listProjects(taikunClient, args)
 	})
 	if err != nil {
@@ -637,7 +638,7 @@ func main() {
 	}
 	logger.Println("Registered list-projects tool")
 
-	err = registerScopedTool(server, "create-project", "Create a new Kubernetes project in Cloudera Cloud Factory", func(args CreateProjectArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "create-project", "Create a Cloudera Cloud Factory project: Kubernetes by default, or set standalone true for a non-Kubernetes project (recommended for standalone VM + commit-project without provisioning a cluster)", func(args CreateProjectArgs) (*mcp_golang.ToolResponse, error) {
 		return createProject(taikunClient, args)
 	})
 	if err != nil {

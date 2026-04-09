@@ -129,10 +129,12 @@ func TestArgumentStructs(t *testing.T) {
 		{
 			name: "ListProjectsArgs",
 			data: ListProjectsArgs{
-				Limit:               10,
-				Search:              "test",
-				HealthyOnly:         true,
-				VirtualClustersOnly: false,
+				Limit:                  10,
+				Search:                 "test",
+				HealthyOnly:            true,
+				KubernetesOnly:         false,
+				VirtualClustersOnly:    false,
+				StandaloneProjectsOnly: false,
 			},
 		},
 		{
@@ -188,6 +190,7 @@ func TestArgumentStructs(t *testing.T) {
 			data: CreateProjectArgs{
 				Name:                "test-project",
 				CloudCredentialID:   123,
+				Standalone:          false,
 				KubernetesProfileID: 456,
 				AlertingProfileID:   789,
 				Monitoring:          true,
