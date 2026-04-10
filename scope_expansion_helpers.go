@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -159,6 +161,25 @@ func listMessage(total int, singular, plural string) string {
 	}
 }
 
+func readResponseBodyPreservingBody(httpResponse *http.Response) ([]byte, error) {
+	if httpResponse == nil || httpResponse.Body == nil {
+		return nil, nil
+	}
+
+	bodyBytes, err := io.ReadAll(httpResponse.Body)
+	_ = httpResponse.Body.Close()
+	httpResponse.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	return bodyBytes, err
+}
+
+func restoreResponseBody(httpResponse *http.Response, bodyBytes []byte) {
+	if httpResponse == nil {
+		return
+	}
+
+	httpResponse.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+}
+
 type apiErrorInfo struct {
 	StatusCode int
 	Message    string
@@ -171,6 +192,21 @@ func apiErrorInfoFromResponse(httpResponse *http.Response, err error) apiErrorIn
 	}
 
 	message := "Unknown error occurred"
+	var bodyBytes []byte
+	if httpResponse != nil && httpResponse.Body != nil {
+		preservedBody, readErr := readResponseBodyPreservingBody(httpResponse)
+		if readErr != nil {
+			message = fmt.Sprintf("failed to read error response body: %v", readErr)
+			logger.Printf("Error occurred: %s", message)
+			return apiErrorInfo{
+				StatusCode: statusCode,
+				Message:    message,
+			}
+		}
+		bodyBytes = preservedBody
+		defer restoreResponseBody(httpResponse, bodyBytes)
+	}
+
 	if taikunErr := taikungoclient.CreateError(httpResponse, err); taikunErr != nil {
 		message = taikunErr.Error()
 	}

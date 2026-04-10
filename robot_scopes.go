@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"slices"
 	"sort"
 	"strings"
@@ -287,7 +286,7 @@ func fetchRobotUserContext(client *taikungoclient.Client) (RobotUserContext, err
 	details, httpResponse, err := client.Client.RobotAPI.RobotDetails(ctx).Execute()
 
 	if httpResponse != nil && httpResponse.Body != nil {
-		body, readErr := io.ReadAll(httpResponse.Body)
+		body, readErr := readResponseBodyPreservingBody(httpResponse)
 		if readErr == nil {
 			parsedCtx, parseErr := parseRobotUserContext(body)
 			if parseErr == nil {

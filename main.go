@@ -268,8 +268,8 @@ type GetProjectDetailsArgs struct {
 
 type WaitForProjectArgs struct {
 	ProjectId   int32 `json:"projectId" jsonschema:"required,description=The ID of the project to wait for"`
-	Timeout     int32 `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds (default: 600 for creation, 300 for deletion)"`
-	WaitDeleted bool  `json:"waitDeleted,omitempty" jsonschema:"description=Wait for the project to be deleted (default: false)"`
+	Timeout     int32 `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds (default: 600 for creation, 300 for deletion). When waitDeleted is true and the project was empty (no servers, VMs, or other resources to tear down), prefer a short timeout such as 10 to 30 seconds because purge usually finishes quickly."`
+	WaitDeleted bool  `json:"waitDeleted,omitempty" jsonschema:"description=Wait for the project to be deleted (default: false). For an empty project after delete-project, set timeout to a small value (e.g. 10 to 30); use the default or longer when the project had infrastructure to remove."`
 }
 
 type WaitForAppArgs struct {
@@ -646,7 +646,7 @@ func main() {
 	}
 	logger.Println("Registered create-project tool")
 
-	err = registerScopedTool(server, "delete-project", "Delete a project in Cloudera Cloud Factory", func(args DeleteProjectArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "delete-project", "Delete a project in Cloudera Cloud Factory. To confirm removal, call wait-for-project with waitDeleted true; if the project was empty, use a short timeout (about 10 to 30 seconds) because purge is usually fast.", func(args DeleteProjectArgs) (*mcp_golang.ToolResponse, error) {
 		return deleteProject(taikunClient, args)
 	})
 	if err != nil {
@@ -654,7 +654,7 @@ func main() {
 	}
 	logger.Println("Registered delete-project tool")
 
-	err = registerScopedTool(server, "wait-for-project", "Wait for a project to be ready and healthy", func(args WaitForProjectArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "wait-for-project", "Wait for a project to be ready and healthy, or with waitDeleted for completion of project deletion. After delete-project on an empty project, pass a short timeout (e.g. 10 to 30 seconds) with waitDeleted true; projects that had servers or VMs typically need longer.", func(args WaitForProjectArgs) (*mcp_golang.ToolResponse, error) {
 		return waitForProject(taikunClient, args)
 	})
 	if err != nil {

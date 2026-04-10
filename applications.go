@@ -432,7 +432,7 @@ func listApps(client *taikungoclient.Client, args ListAppsArgs) (*mcp_golang.Too
 
 		// If unmarshaling failed, try to parse the raw body
 		if httpResponse != nil && httpResponse.Body != nil {
-			bodyBytes, readErr := io.ReadAll(httpResponse.Body)
+			bodyBytes, readErr := readResponseBodyPreservingBody(httpResponse)
 			if readErr == nil {
 				body := string(bodyBytes)
 				// Use gjson to extract applications
