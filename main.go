@@ -165,9 +165,41 @@ type SetCatalogAppDefaultParamsArgs struct {
 }
 
 type ListRepositoriesArgs struct {
-	Limit  int32  `json:"limit,omitempty" jsonschema:"description=Maximum number of results to return (optional)"`
-	Offset int32  `json:"offset,omitempty" jsonschema:"description=Number of results to skip (optional)"`
-	Search string `json:"search,omitempty" jsonschema:"description=Search term to filter results (optional)"`
+	Limit          int32  `json:"limit,omitempty" jsonschema:"description=Maximum number of results to return (optional)"`
+	Offset         int32  `json:"offset,omitempty" jsonschema:"description=Number of results to skip (optional)"`
+	Search         string `json:"search,omitempty" jsonschema:"description=Search term to filter results (optional)"`
+	SortBy         string `json:"sortBy,omitempty" jsonschema:"description=Field to sort by when supported (optional)"`
+	SortDirection  string `json:"sortDirection,omitempty" jsonschema:"description=Sort direction such as asc or desc (optional)"`
+	ID             string `json:"id,omitempty" jsonschema:"description=Exact repository ID filter (optional)"`
+	IsPrivate      *bool  `json:"isPrivate,omitempty" jsonschema:"description=Filter private or public repositories (optional)"`
+	OrganizationID int32  `json:"organizationId,omitempty" jsonschema:"description=Organization ID filter (optional)"`
+}
+
+type ImportRepositoryArgs struct {
+	Name           string `json:"name" jsonschema:"required,description=Repository display name"`
+	URL            string `json:"url" jsonschema:"required,description=Repository URL such as a Helm or OCI repository"`
+	OrganizationID int32  `json:"organizationId,omitempty" jsonschema:"description=Organization ID to associate with the import (optional)"`
+	Username       string `json:"username,omitempty" jsonschema:"description=Username for private repository authentication (optional)"`
+	Password       string `json:"password,omitempty" jsonschema:"description=Password for private repository authentication (optional)"`
+}
+
+type BindRepositoryArgs struct {
+	RepositoryID               string `json:"repositoryId,omitempty" jsonschema:"description=Repository ID from list-repositories (optional if name is provided)"`
+	Name                       string `json:"name,omitempty" jsonschema:"description=Repository name to bind when repositoryId is not provided (optional)"`
+	RepositoryOrganizationName string `json:"repositoryOrganizationName,omitempty" jsonschema:"description=Repository owner or organization name to disambiguate by name (optional)"`
+	OrganizationID             int32  `json:"organizationId,omitempty" jsonschema:"description=Organization ID to bind the repository to (optional when the API can infer it)"`
+}
+
+type UnbindRepositoryArgs struct {
+	RepositoryID   string   `json:"repositoryId,omitempty" jsonschema:"description=Single repository ID to unbind (optional if repositoryIds is provided)"`
+	RepositoryIDs  []string `json:"repositoryIds,omitempty" jsonschema:"description=Repository IDs to unbind (optional if repositoryId is provided)"`
+	OrganizationID int32    `json:"organizationId,omitempty" jsonschema:"description=Organization ID to unbind the repository from (optional when the API can infer it)"`
+}
+
+type DeleteRepositoryArgs struct {
+	AppRepoID      int32  `json:"appRepoId,omitempty" jsonschema:"description=Imported repository appRepoId from list-repositories (optional if repositoryId is provided)"`
+	RepositoryID   string `json:"repositoryId,omitempty" jsonschema:"description=Repository ID used to resolve appRepoId before deletion (optional if appRepoId is provided)"`
+	OrganizationID int32  `json:"organizationId,omitempty" jsonschema:"description=Organization ID filter used when resolving repositoryId (optional)"`
 }
 
 type ListAvailablePackagesArgs struct {
@@ -550,6 +582,46 @@ func main() {
 	}
 	logger.Println("Registered available-apps-list tool")
 
+	err = registerScopedTool(server, "list-repositories", "List repositories with optional filtering", func(args ListRepositoriesArgs) (*mcp_golang.ToolResponse, error) {
+		return listRepositories(taikunClient, args)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register list-repositories tool: %v", err)
+	}
+	logger.Println("Registered list-repositories tool")
+
+	err = registerScopedTool(server, "import-repository", "Import a repository from a URL with optional credentials", func(args ImportRepositoryArgs) (*mcp_golang.ToolResponse, error) {
+		return importRepository(taikunClient, args)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register import-repository tool: %v", err)
+	}
+	logger.Println("Registered import-repository tool")
+
+	err = registerScopedTool(server, "bind-repository", "Bind a repository to an organization so its apps become available", func(args BindRepositoryArgs) (*mcp_golang.ToolResponse, error) {
+		return bindRepository(taikunClient, args)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register bind-repository tool: %v", err)
+	}
+	logger.Println("Registered bind-repository tool")
+
+	err = registerScopedTool(server, "unbind-repository", "Unbind one or more repository IDs from an organization", func(args UnbindRepositoryArgs) (*mcp_golang.ToolResponse, error) {
+		return unbindRepository(taikunClient, args)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register unbind-repository tool: %v", err)
+	}
+	logger.Println("Registered unbind-repository tool")
+
+	err = registerScopedTool(server, "delete-repository", "Delete an imported repository", func(args DeleteRepositoryArgs) (*mcp_golang.ToolResponse, error) {
+		return deleteRepository(taikunClient, args)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register delete-repository tool: %v", err)
+	}
+	logger.Println("Registered delete-repository tool")
+
 	err = registerScopedTool(server, "catalog-app-add", "Add an application to a catalog with optional default parameters", func(args AddAppToCatalogWithParametersArgs) (*mcp_golang.ToolResponse, error) {
 		return addAppToCatalogWithParameters(taikunClient, args)
 	})
@@ -790,6 +862,94 @@ func main() {
 	}
 	logger.Println("Registered delete-servers-from-project tool")
 
+	mustRegisterScopedTool(server, "list-domains", "List domains", func(args SearchListArgs) (*mcp_golang.ToolResponse, error) {
+		return listDomains(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "create-domain", "Create a domain", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createDomain(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "get-domain-details", "Get domain details", func(args IDArgs) (*mcp_golang.ToolResponse, error) {
+		return getDomainDetails(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-domain", "Update a domain", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return updateDomain(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "delete-domain", "Delete a domain", func(args IDArgs) (*mcp_golang.ToolResponse, error) {
+		return deleteDomain(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "list-organizations", "List organizations", func(args SearchListArgs) (*mcp_golang.ToolResponse, error) {
+		return listOrganizations(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "create-organization", "Create an organization", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createOrganization(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "get-organization-details", "Get organization details", func(args IDArgs) (*mcp_golang.ToolResponse, error) {
+		return getOrganizationDetails(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-organization", "Update an organization", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return updateOrganization(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "delete-organization", "Delete an organization", func(args IDArgs) (*mcp_golang.ToolResponse, error) {
+		return deleteOrganization(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "list-identity-groups", "List identity groups within a domain", func(args SearchListArgs) (*mcp_golang.ToolResponse, error) {
+		return listIdentityGroups(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "create-identity-group", "Create an identity group", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createIdentityGroup(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "get-identity-group-details", "Get identity group details within a domain", func(args DomainScopedIDArgs) (*mcp_golang.ToolResponse, error) {
+		return getIdentityGroupDetails(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "list-identity-group-organizations", "List organizations assigned to an identity group", func(args DomainScopedIDArgs) (*mcp_golang.ToolResponse, error) {
+		return listIdentityGroupOrganizations(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "list-identity-group-users", "List users assigned to an identity group", func(args DomainScopedIDArgs) (*mcp_golang.ToolResponse, error) {
+		return listIdentityGroupUsers(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "list-available-group-organizations", "List organizations available to add to an identity group", func(args DomainScopedIDArgs) (*mcp_golang.ToolResponse, error) {
+		return listAvailableIdentityGroupOrganizations(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "list-available-identity-group-users", "List users available to add to an identity group", func(args DomainScopedIDArgs) (*mcp_golang.ToolResponse, error) {
+		return listAvailableIdentityGroupUsers(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "add-organizations-to-identity-group", "Add organizations to an identity group", func(args IDPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return addOrganizationsToIdentityGroup(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-identity-group-organization", "Update an organization's membership settings in an identity group", func(args GroupOrganizationPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return updateIdentityGroupOrganization(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "remove-organizations-from-group", "Remove organizations from an identity group", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return removeOrganizationsFromIdentityGroup(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "add-users-to-identity-group", "Add users to an identity group", func(args IDPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return addUsersToIdentityGroup(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "remove-users-from-identity-group", "Remove users from an identity group", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return removeUsersFromIdentityGroup(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-identity-group", "Update an identity group", func(args IDPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return updateIdentityGroup(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "delete-identity-group", "Delete an identity group", func(args IDArgs) (*mcp_golang.ToolResponse, error) {
+		return deleteIdentityGroup(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "list-users", "List users within a domain", func(args SearchListArgs) (*mcp_golang.ToolResponse, error) {
+		return listUsers(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "create-user", "Create a user", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return createUser(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "get-user-details", "Get user details within a domain", func(args DomainScopedStringIDArgs) (*mcp_golang.ToolResponse, error) {
+		return getUserDetails(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "update-user", "Update a user", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+		return updateUser(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "delete-user", "Delete a user", func(args StringIDArgs) (*mcp_golang.ToolResponse, error) {
+		return deleteUser(taikunClient, args)
+	})
+
 	mustRegisterScopedTool(server, "list-access-profiles", "List access profiles", func(args SearchListArgs) (*mcp_golang.ToolResponse, error) {
 		return listAccessProfiles(taikunClient, args)
 	})
@@ -945,7 +1105,7 @@ func main() {
 	mustRegisterScopedTool(server, "list-project-backup-schedules", "List backup schedules for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
 		return listProjectBackupSchedules(taikunClient, args)
 	})
-	mustRegisterScopedTool(server, "list-project-backup-storage-locations", "List backup storage locations for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
+	mustRegisterScopedTool(server, "list-project-backup-locations", "List backup storage locations for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
 		return listProjectBackupStorageLocations(taikunClient, args)
 	})
 	mustRegisterScopedTool(server, "list-project-backup-delete-requests", "List backup delete requests for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {

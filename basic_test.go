@@ -160,9 +160,49 @@ func TestArgumentStructs(t *testing.T) {
 		{
 			name: "ListRepositoriesArgs",
 			data: ListRepositoriesArgs{
-				Limit:  10,
-				Offset: 0,
-				Search: "bitnami",
+				Limit:          10,
+				Offset:         0,
+				Search:         "bitnami",
+				SortBy:         "name",
+				SortDirection:  "asc",
+				ID:             "repo-123",
+				IsPrivate:      func() *bool { v := true; return &v }(),
+				OrganizationID: 321,
+			},
+		},
+		{
+			name: "ImportRepositoryArgs",
+			data: ImportRepositoryArgs{
+				Name:           "anywhere-cloud",
+				URL:            "oci://docker-private.infra.cloudera.com/cloudera-helm/awc-core/anywhere-cloud",
+				OrganizationID: 321,
+				Username:       "robot-user",
+				Password:       "robot-password",
+			},
+		},
+		{
+			name: "BindRepositoryArgs",
+			data: BindRepositoryArgs{
+				RepositoryID:               "repo-123",
+				Name:                       "anywhere-cloud",
+				RepositoryOrganizationName: "cloudera-helm",
+				OrganizationID:             321,
+			},
+		},
+		{
+			name: "UnbindRepositoryArgs",
+			data: UnbindRepositoryArgs{
+				RepositoryID:   "repo-123",
+				RepositoryIDs:  []string{"repo-123", "repo-456"},
+				OrganizationID: 321,
+			},
+		},
+		{
+			name: "DeleteRepositoryArgs",
+			data: DeleteRepositoryArgs{
+				AppRepoID:      654,
+				RepositoryID:   "repo-123",
+				OrganizationID: 321,
 			},
 		},
 		{
@@ -306,6 +346,34 @@ func TestArgumentStructs(t *testing.T) {
 			},
 		},
 		{
+			name: "StringIDArgs",
+			data: StringIDArgs{
+				ID: "user-123",
+			},
+		},
+		{
+			name: "DomainScopedIDArgs",
+			data: DomainScopedIDArgs{
+				DomainID: 12,
+				ID:       34,
+			},
+		},
+		{
+			name: "DomainScopedStringIDArgs",
+			data: DomainScopedStringIDArgs{
+				DomainID: 12,
+				ID:       "user-123",
+			},
+		},
+		{
+			name: "GroupOrganizationPayloadArgs",
+			data: GroupOrganizationPayloadArgs{
+				GroupID:        12,
+				OrganizationID: 34,
+				Payload:        `{"role":"Manager"}`,
+			},
+		},
+		{
 			name: "ProjectIDArgs",
 			data: ProjectIDArgs{
 				ProjectID: 123,
@@ -358,6 +426,7 @@ func TestArgumentStructs(t *testing.T) {
 			data: SearchListArgs{
 				Limit:          10,
 				Offset:         5,
+				CursorID:       7,
 				Search:         "example",
 				SortBy:         "name",
 				SortDirection:  "asc",

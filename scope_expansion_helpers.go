@@ -26,6 +26,26 @@ type IDPayloadArgs struct {
 	Payload string `json:"payload" jsonschema:"required,description=JSON payload matching the underlying Cloudera Cloud Factory API command schema"`
 }
 
+type StringIDArgs struct {
+	ID string `json:"id" jsonschema:"required,description=String ID of the target resource"`
+}
+
+type DomainScopedIDArgs struct {
+	DomainID int32 `json:"domainId" jsonschema:"required,description=Domain ID of the parent resource"`
+	ID       int32 `json:"id" jsonschema:"required,description=ID of the target resource inside the domain"`
+}
+
+type DomainScopedStringIDArgs struct {
+	DomainID int32  `json:"domainId" jsonschema:"required,description=Domain ID of the parent resource"`
+	ID       string `json:"id" jsonschema:"required,description=String ID of the target resource inside the domain"`
+}
+
+type GroupOrganizationPayloadArgs struct {
+	GroupID        int32  `json:"groupId" jsonschema:"required,description=Identity group ID"`
+	OrganizationID int32  `json:"organizationId" jsonschema:"required,description=Organization ID within the identity group"`
+	Payload        string `json:"payload" jsonschema:"required,description=JSON payload matching the underlying Cloudera Cloud Factory API command schema"`
+}
+
 type ProjectIDArgs struct {
 	ProjectID int32 `json:"projectId" jsonschema:"required,description=Project ID"`
 }
@@ -63,6 +83,7 @@ type LockModeArgs struct {
 type SearchListArgs struct {
 	Limit          int32  `json:"limit,omitempty" jsonschema:"description=Maximum number of results to return"`
 	Offset         int32  `json:"offset,omitempty" jsonschema:"description=Number of results to skip"`
+	CursorID       int32  `json:"cursorId,omitempty" jsonschema:"description=Cursor ID for cursor-based pagination when supported"`
 	Search         string `json:"search,omitempty" jsonschema:"description=Search term to filter results"`
 	SortBy         string `json:"sortBy,omitempty" jsonschema:"description=Field name to sort by when supported"`
 	SortDirection  string `json:"sortDirection,omitempty" jsonschema:"description=Sort direction such as asc or desc when supported"`
@@ -140,6 +161,25 @@ func finalizeAPIOperation(apiResp *taikuncore.ApiResponse, httpResponse *http.Re
 		resp["result"] = apiResp.Result
 	}
 	return createJSONResponse(resp), nil
+}
+
+func finalizeIDOperation(id int32, httpResponse *http.Response, err error, operation, fallbackMessage, idField string) (*mcp_golang.ToolResponse, error) {
+	if err != nil {
+		return apiErrorInfoFromResponse(httpResponse, err).toolResponse(), nil
+	}
+	if errorResp := checkResponse(httpResponse, operation); errorResp != nil {
+		return errorResp, nil
+	}
+
+	if idField == "" {
+		idField = "id"
+	}
+
+	return createJSONResponse(map[string]interface{}{
+		"message": fallbackMessage,
+		"success": true,
+		idField:   id,
+	}), nil
 }
 
 func createListResponse(key string, items interface{}, total int, message string) *mcp_golang.ToolResponse {

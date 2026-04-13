@@ -25,7 +25,7 @@ func TestCommitProjectFallbackDecisionUsesResponseBody(t *testing.T) {
 	}
 
 	shouldUseVMCommit, errorInfo := commitProjectFallbackDecision(httpResponse, nil)
-	if errorInfo == nil {
+	if errorInfo.Message == "" {
 		t.Fatal("expected error info for non-2xx response")
 	}
 	if !shouldUseVMCommit {

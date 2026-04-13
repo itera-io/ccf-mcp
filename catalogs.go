@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/itera-io/taikungoclient"
 	taikuncore "github.com/itera-io/taikungoclient/client"
@@ -771,79 +770,6 @@ func updateCatalogAppParameters(client *taikungoclient.Client, args SetCatalogAp
 	}
 
 	return createJSONResponse(successResp), nil
-}
-
-func listRepositories(client *taikungoclient.Client, args ListRepositoriesArgs) (*mcp_golang.ToolResponse, error) {
-	ctx := context.Background()
-
-	// Get all catalogs first
-	catalogReq := client.Client.CatalogAPI.CatalogList(ctx)
-	catalogList, response, err := catalogReq.Execute()
-	if err != nil {
-		return createError(response, err), nil
-	}
-
-	if errorResp := checkResponse(response, "list catalogs for repository discovery"); errorResp != nil {
-		return errorResp, nil
-	}
-
-	// Collect unique repositories from all catalog apps
-	repositorySet := make(map[string]bool)
-
-	if catalogList != nil && len(catalogList.Data) > 0 {
-		for _, catalog := range catalogList.Data {
-			// List apps in each catalog to find repositories
-			appReq := client.Client.CatalogAppAPI.CatalogAppList(ctx).CatalogId(catalog.GetId())
-			catalogAppList, _, err := appReq.Execute()
-			if err != nil {
-				// Continue with other catalogs if one fails
-				continue
-			}
-
-			if catalogAppList != nil && len(catalogAppList.Data) > 0 {
-				for _, app := range catalogAppList.Data {
-					if app.RepoName.IsSet() && app.RepoName.Get() != nil {
-						repoName := *app.RepoName.Get()
-						if repoName != "" {
-							// Apply search filter if provided
-							if args.Search == "" || strings.Contains(strings.ToLower(repoName), strings.ToLower(args.Search)) {
-								repositorySet[repoName] = true
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// Convert set to slice
-	var repositories []string
-	for repo := range repositorySet {
-		repositories = append(repositories, repo)
-	}
-
-	// Apply deterministic ordering before pagination so offset/limit are stable.
-	total := len(repositories)
-	repositories = sortAndPaginateStrings(repositories, args.Offset, args.Limit)
-
-	message := fmt.Sprintf("Found %d unique repositories", total)
-	if total == 0 {
-		message = "No repositories found"
-	} else if len(repositories) == 0 {
-		message = fmt.Sprintf("No repositories found on the requested page (total matches: %d)", total)
-	}
-
-	listResp := struct {
-		Repositories []string `json:"repositories"`
-		Total        int      `json:"total"`
-		Message      string   `json:"message"`
-	}{
-		Repositories: repositories,
-		Total:        total,
-		Message:      message,
-	}
-
-	return createJSONResponse(listResp), nil
 }
 
 func listAvailablePackages(client *taikungoclient.Client, args ListAvailablePackagesArgs) (*mcp_golang.ToolResponse, error) {

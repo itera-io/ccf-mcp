@@ -210,11 +210,11 @@ func commitProjectWithFallback(client *taikungoclient.Client, projectID int32) (
 		ProjectDeploymentCommitCommand(*command).
 		Execute()
 
-	if shouldUseVMCommit, errorInfo := commitProjectFallbackDecision(httpResponse, err); errorInfo != nil {
+	if shouldUseVMCommit, errorInfo := commitProjectFallbackDecision(httpResponse, err); errorInfo.Message != "" {
 		if shouldUseVMCommit {
 			return commitProjectVMChanges(client, projectID)
 		}
-		return projectCommitResult{}, errorInfo
+		return projectCommitResult{}, &errorInfo
 	}
 
 	return projectCommitResult{
@@ -233,8 +233,8 @@ func commitProjectVMChanges(client *taikungoclient.Client, projectID int32) (pro
 		DeploymentCommitVmCommand(*vmCommand).
 		Execute()
 
-	if _, errorInfo := commitProjectFallbackDecision(httpResponse, err); errorInfo != nil {
-		return projectCommitResult{}, errorInfo
+	if _, errorInfo := commitProjectFallbackDecision(httpResponse, err); errorInfo.Message != "" {
+		return projectCommitResult{}, &errorInfo
 	}
 
 	return projectCommitResult{
@@ -243,13 +243,13 @@ func commitProjectVMChanges(client *taikungoclient.Client, projectID int32) (pro
 	}, nil
 }
 
-func commitProjectFallbackDecision(httpResponse *http.Response, err error) (bool, *apiErrorInfo) {
+func commitProjectFallbackDecision(httpResponse *http.Response, err error) (bool, apiErrorInfo) {
 	if err == nil && httpResponse != nil && httpResponse.StatusCode >= 200 && httpResponse.StatusCode < 300 {
-		return false, nil
+		return false, apiErrorInfo{}
 	}
 
 	errorInfo := apiErrorInfoFromResponse(httpResponse, err)
-	return commitProjectNeedsVMMessage(errorInfo.Message), &errorInfo
+	return commitProjectNeedsVMMessage(errorInfo.Message), errorInfo
 }
 
 func commitProjectNeedsVMEndpoint(err error) bool {
