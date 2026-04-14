@@ -574,6 +574,22 @@ func main() {
 	}
 	logger.Println("Registered catalog-delete tool")
 
+	err = registerScopedTool(server, "bind-projects-to-catalog", "Bind one or more projects to a catalog so they can install apps from it", func(args BindProjectsToCatalogArgs) (*mcp_golang.ToolResponse, error) {
+		return bindProjectsToCatalog(taikunClient, args)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register bind-projects-to-catalog tool: %v", err)
+	}
+	logger.Println("Registered bind-projects-to-catalog tool")
+
+	err = registerScopedTool(server, "unbind-projects-from-catalog", "Unbind projects from a catalog", func(args UnbindProjectsFromCatalogArgs) (*mcp_golang.ToolResponse, error) {
+		return unbindProjectsFromCatalog(taikunClient, args)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register unbind-projects-from-catalog tool: %v", err)
+	}
+	logger.Println("Registered unbind-projects-from-catalog tool")
+
 	err = registerScopedTool(server, "available-apps-list", "List available apps from the package repository", func(args ListAvailableAppsArgs) (*mcp_golang.ToolResponse, error) {
 		return listAvailableApps(taikunClient, args)
 	})

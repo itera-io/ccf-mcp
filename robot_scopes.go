@@ -63,6 +63,8 @@ var toolRequiredScopes = map[string][]string{
 	"catalog-create":               {"scope:applications:write"},
 	"catalog-list":                 {"scope:applications:read"},
 	"catalog-delete":               {"scope:applications:write"},
+	"bind-projects-to-catalog":     {"scope:applications:write"},
+	"unbind-projects-from-catalog": {"scope:applications:write"},
 	"available-apps-list":          {"scope:applications:read"},
 	"list-repositories":            {"scope:applications:read"},
 	"import-repository":            {"scope:applications:write"},

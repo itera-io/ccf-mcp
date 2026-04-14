@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/url"
 	"sort"
 
 	"github.com/itera-io/taikungoclient"
@@ -43,15 +45,68 @@ type UnbindProjectsFromCatalogArgs struct {
 	ProjectIDs []int32 `json:"projectIds" jsonschema:"required,description=Array of project IDs to unbind from the catalog"`
 }
 
+// resolveOrganizationIDForCatalog returns an organization ID for catalog APIs that require it (e.g. Robot User).
+// If explicit is set, it is returned. Otherwise the first organization visible to the client is used.
+func resolveOrganizationIDForCatalog(client *taikungoclient.Client, ctx context.Context, explicit int32) (int32, *mcp_golang.ToolResponse) {
+	if explicit > 0 {
+		return explicit, nil
+	}
+
+	result, httpResponse, err := client.Client.OrganizationsAPI.OrganizationsList(ctx).Limit(25).Execute()
+	if err != nil {
+		return 0, createError(httpResponse, err)
+	}
+	if errorResp := checkResponse(httpResponse, "list organizations"); errorResp != nil {
+		return 0, errorResp
+	}
+	if result != nil && len(result.GetData()) > 0 {
+		return result.GetData()[0].GetId(), nil
+	}
+
+	acctQuery := url.Values{}
+	acctQuery.Set("Limit", "1")
+	acctResp, httpResponse2, err2 := performAuthenticatedJSONRequest[accountListCursorPaginatedResponse](client, http.MethodGet, "/api/v1/accounts", acctQuery, nil)
+	if err2 != nil {
+		return 0, createError(httpResponse2, err2)
+	}
+	if errorResp := checkResponse(httpResponse2, "list accounts"); errorResp != nil {
+		return 0, errorResp
+	}
+	if acctResp == nil || len(acctResp.Data) == 0 {
+		return 0, createJSONResponse(ErrorResponse{
+			Error: "could not resolve organizationId: pass organizationId explicitly or ensure at least one organization exists",
+		})
+	}
+	accountID := acctResp.Data[0].ID
+	orgQuery := url.Values{}
+	orgQuery.Set("AccountId", fmt.Sprintf("%d", accountID))
+	items, httpResponse3, err3 := performAuthenticatedJSONRequest[[]taikuncore.OrganizationDropdownDto](client, http.MethodGet, "/api/v1/organizations/list", orgQuery, nil)
+	if err3 != nil {
+		return 0, createError(httpResponse3, err3)
+	}
+	if errorResp := checkResponse(httpResponse3, "list organizations by account"); errorResp != nil {
+		return 0, errorResp
+	}
+	if items == nil || len(*items) == 0 {
+		return 0, createJSONResponse(ErrorResponse{
+			Error: "could not resolve organizationId: no organizations for this account — pass organizationId explicitly",
+		})
+	}
+	return (*items)[0].GetId(), nil
+}
+
 func createCatalog(client *taikungoclient.Client, args CreateCatalogArgs) (*mcp_golang.ToolResponse, error) {
 	ctx := context.Background()
+
+	orgID, errResp := resolveOrganizationIDForCatalog(client, ctx, args.OrganizationID)
+	if errResp != nil {
+		return errResp, nil
+	}
 
 	createCmd := taikuncore.NewCreateCatalogCommand()
 	createCmd.SetName(args.Name)
 	createCmd.SetDescription(args.Description)
-	if args.OrganizationID > 0 {
-		createCmd.SetOrganizationId(args.OrganizationID)
-	}
+	createCmd.SetOrganizationId(orgID)
 
 	response, err := client.Client.CatalogAPI.CatalogCreate(ctx).
 		CreateCatalogCommand(*createCmd).
