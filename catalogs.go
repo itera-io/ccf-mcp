@@ -11,8 +11,9 @@ import (
 )
 
 type CreateCatalogArgs struct {
-	Name        string `json:"name" jsonschema:"required,description=The name of the catalog"`
-	Description string `json:"description" jsonschema:"required,description=The description of the catalog"`
+	Name             string `json:"name" jsonschema:"required,description=The name of the catalog"`
+	Description      string `json:"description" jsonschema:"required,description=The description of the catalog"`
+	OrganizationID   int32  `json:"organizationId,omitempty" jsonschema:"description=Organization ID (required for Robot User / account-wide operations when the API enforces it)"`
 }
 
 type ListCatalogsArgs struct {
@@ -48,6 +49,9 @@ func createCatalog(client *taikungoclient.Client, args CreateCatalogArgs) (*mcp_
 	createCmd := taikuncore.NewCreateCatalogCommand()
 	createCmd.SetName(args.Name)
 	createCmd.SetDescription(args.Description)
+	if args.OrganizationID > 0 {
+		createCmd.SetOrganizationId(args.OrganizationID)
+	}
 
 	response, err := client.Client.CatalogAPI.CatalogCreate(ctx).
 		CreateCatalogCommand(*createCmd).
