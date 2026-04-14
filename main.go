@@ -135,12 +135,14 @@ type AddAppToCatalogArgs struct {
 	CatalogID   int32  `json:"catalogId" jsonschema:"required,description=The catalog ID to add the application to"`
 	Repository  string `json:"repository" jsonschema:"required,description=Repository name (3-30 chars, lowercase/numeric)"`
 	PackageName string `json:"packageName" jsonschema:"required,description=Package name (3-30 chars, lowercase/numeric)"`
+	Version     string `json:"version,omitempty" jsonschema:"description=Specific package version to add (optional; auto-resolved when there is a single match)"`
 }
 
 type AddAppToCatalogWithParametersArgs struct {
 	CatalogID   int32          `json:"catalogId" jsonschema:"required,description=The catalog ID to add the application to"`
 	Repository  string         `json:"repository" jsonschema:"required,description=Repository name (3-30 chars, lowercase/numeric)"`
 	PackageName string         `json:"packageName" jsonschema:"required,description=Package name (3-30 chars, lowercase/numeric)"`
+	Version     string         `json:"version,omitempty" jsonschema:"description=Specific package version to add (optional; auto-resolved when there is a single match)"`
 	Parameters  []AppParameter `json:"parameters,omitempty" jsonschema:"description=Default application parameters to set in the catalog (optional)"`
 }
 
@@ -200,6 +202,13 @@ type DeleteRepositoryArgs struct {
 	AppRepoID      int32  `json:"appRepoId,omitempty" jsonschema:"description=Imported repository appRepoId from list-repositories (optional if repositoryId is provided)"`
 	RepositoryID   string `json:"repositoryId,omitempty" jsonschema:"description=Repository ID used to resolve appRepoId before deletion (optional if appRepoId is provided)"`
 	OrganizationID int32  `json:"organizationId,omitempty" jsonschema:"description=Organization ID filter used when resolving repositoryId (optional)"`
+}
+
+type UpdateRepositoryPasswordArgs struct {
+	RepositoryID   string `json:"repositoryId" jsonschema:"required,description=Repository ID to update credentials for"`
+	Username       string `json:"username" jsonschema:"required,description=Username for the repository"`
+	Password       string `json:"password" jsonschema:"required,description=Password or token for the repository"`
+	OrganizationID int32  `json:"organizationId,omitempty" jsonschema:"description=Organization ID to update the repository in (optional when the Robot User context has one)"`
 }
 
 type ListAvailablePackagesArgs struct {
@@ -637,6 +646,14 @@ func main() {
 		logger.Fatalf("Failed to register delete-repository tool: %v", err)
 	}
 	logger.Println("Registered delete-repository tool")
+
+	err = registerScopedTool(server, "update-repository-password", "Update stored credentials for a private repository", func(args UpdateRepositoryPasswordArgs) (*mcp_golang.ToolResponse, error) {
+		return updateRepositoryPassword(taikunClient, args)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register update-repository-password tool: %v", err)
+	}
+	logger.Println("Registered update-repository-password tool")
 
 	err = registerScopedTool(server, "catalog-app-add", "Add an application to a catalog with optional default parameters", func(args AddAppToCatalogWithParametersArgs) (*mcp_golang.ToolResponse, error) {
 		return addAppToCatalogWithParameters(taikunClient, args)

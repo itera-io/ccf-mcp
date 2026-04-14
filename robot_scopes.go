@@ -71,6 +71,7 @@ var toolRequiredScopes = map[string][]string{
 	"bind-repository":              {"scope:applications:write"},
 	"unbind-repository":            {"scope:applications:write"},
 	"delete-repository":            {"scope:applications:write"},
+	"update-repository-password":   {"scope:applications:write"},
 	"catalog-app-add":              {"scope:applications:write"},
 	"catalog-apps-list":            {"scope:applications:read"},
 	"catalog-app-params":           {"scope:applications:read"},

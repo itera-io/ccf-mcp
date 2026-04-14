@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"testing"
+
+	taikuncore "github.com/itera-io/taikungoclient/client"
 )
 
 func TestMain(m *testing.M) {
@@ -132,6 +134,27 @@ func TestResolveOrganizationIDForCatalogPrefersRobotUserContext(t *testing.T) {
 	}
 }
 
+func TestBuildCreateCatalogAppCommandAlwaysSendsParametersArray(t *testing.T) {
+	cmd := buildCreateCatalogAppCommand(360, "anywhere-cloud", "anywhere-cloud", "", nil)
+	payload, err := cmd.ToMap()
+	if err != nil {
+		t.Fatalf("expected no error building payload map, got %v", err)
+	}
+
+	parameters, ok := payload["parameters"]
+	if !ok {
+		t.Fatal("expected parameters key to be present")
+	}
+
+	paramsSlice, ok := parameters.([]taikuncore.CatalogAppParamsDto)
+	if !ok {
+		t.Fatalf("expected parameters to be []CatalogAppParamsDto, got %T", parameters)
+	}
+	if len(paramsSlice) != 0 {
+		t.Fatalf("expected empty parameters slice, got len=%d", len(paramsSlice))
+	}
+}
+
 func TestArgumentStructs(t *testing.T) {
 	// Test that our argument structs can be marshaled/unmarshaled
 	tests := []struct {
@@ -170,6 +193,7 @@ func TestArgumentStructs(t *testing.T) {
 				CatalogID:   123,
 				Repository:  "bitnami",
 				PackageName: "nginx",
+				Version:     "1.2.3",
 			},
 		},
 		{
@@ -178,6 +202,7 @@ func TestArgumentStructs(t *testing.T) {
 				CatalogID:   123,
 				Repository:  "bitnami",
 				PackageName: "nginx",
+				Version:     "1.2.3",
 				Parameters: []AppParameter{
 					{
 						Key:   "replicaCount",
@@ -231,6 +256,15 @@ func TestArgumentStructs(t *testing.T) {
 			data: DeleteRepositoryArgs{
 				AppRepoID:      654,
 				RepositoryID:   "repo-123",
+				OrganizationID: 321,
+			},
+		},
+		{
+			name: "UpdateRepositoryPasswordArgs",
+			data: UpdateRepositoryPasswordArgs{
+				RepositoryID:   "repo-123",
+				Username:       "robot-user",
+				Password:       "robot-password",
 				OrganizationID: 321,
 			},
 		},

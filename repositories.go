@@ -240,6 +240,57 @@ func deleteRepository(client *taikungoclient.Client, args DeleteRepositoryArgs) 
 	}), nil
 }
 
+func updateRepositoryPassword(client *taikungoclient.Client, args UpdateRepositoryPasswordArgs) (*mcp_golang.ToolResponse, error) {
+	if args.RepositoryID == "" {
+		return createJSONResponse(ErrorResponse{
+			Error: "repositoryId is required",
+		}), nil
+	}
+	if args.Username == "" {
+		return createJSONResponse(ErrorResponse{
+			Error: "username is required",
+		}), nil
+	}
+	if args.Password == "" {
+		return createJSONResponse(ErrorResponse{
+			Error: "password is required",
+		}), nil
+	}
+
+	organizationID := args.OrganizationID
+	if organizationID == 0 {
+		robotCtx := getRobotUserContext()
+		organizationID = robotCtx.OrganizationID
+	}
+	if organizationID == 0 {
+		return createJSONResponse(ErrorResponse{
+			Error: "organizationId is required when the Robot User context does not expose one",
+		}), nil
+	}
+
+	command := taikuncore.NewUpdateRepoPasswordCommand()
+	command.SetRepositoryId(args.RepositoryID)
+	command.SetUsername(args.Username)
+	command.SetPassword(args.Password)
+	command.SetOrganizationId(organizationID)
+
+	ctx := context.Background()
+	response, err := client.Client.AppRepositoriesAPI.RepositoryUpdatePassword(ctx).
+		UpdateRepoPasswordCommand(*command).
+		Execute()
+	if err != nil {
+		return createError(response, err), nil
+	}
+	if errorResp := checkResponse(response, "update repository password"); errorResp != nil {
+		return errorResp, nil
+	}
+
+	return createJSONResponse(SuccessResponse{
+		Message: fmt.Sprintf("Repository credentials updated successfully for repositoryId '%s'", args.RepositoryID),
+		Success: true,
+	}), nil
+}
+
 func applyRepositoryAvailableFilters(req taikuncore.ApiRepositoryAvailableListRequest, args ListRepositoriesArgs) taikuncore.ApiRepositoryAvailableListRequest {
 	if args.SortBy != "" {
 		req = req.SortBy(args.SortBy)
