@@ -46,10 +46,16 @@ type UnbindProjectsFromCatalogArgs struct {
 }
 
 // resolveOrganizationIDForCatalog returns an organization ID for catalog APIs that require it (e.g. Robot User).
-// If explicit is set, it is returned. Otherwise the first organization visible to the client is used.
+// If explicit is set, it is returned. Otherwise prefer the current Robot User context and fail closed
+// when multiple organizations are visible instead of guessing.
 func resolveOrganizationIDForCatalog(client *taikungoclient.Client, ctx context.Context, explicit int32) (int32, *mcp_golang.ToolResponse) {
 	if explicit > 0 {
 		return explicit, nil
+	}
+
+	robotCtx := getRobotUserContext()
+	if robotCtx.OrganizationID > 0 {
+		return robotCtx.OrganizationID, nil
 	}
 
 	result, httpResponse, err := client.Client.OrganizationsAPI.OrganizationsList(ctx).Limit(25).Execute()
@@ -59,25 +65,41 @@ func resolveOrganizationIDForCatalog(client *taikungoclient.Client, ctx context.
 	if errorResp := checkResponse(httpResponse, "list organizations"); errorResp != nil {
 		return 0, errorResp
 	}
-	if result != nil && len(result.GetData()) > 0 {
-		return result.GetData()[0].GetId(), nil
+	if result != nil {
+		if len(result.GetData()) == 1 {
+			return result.GetData()[0].GetId(), nil
+		}
+		if len(result.GetData()) > 1 {
+			return 0, createJSONResponse(ErrorResponse{
+				Error: "multiple organizations are visible to this Robot User; pass organizationId explicitly",
+			})
+		}
 	}
 
-	acctQuery := url.Values{}
-	acctQuery.Set("Limit", "1")
-	acctResp, httpResponse2, err2 := performAuthenticatedJSONRequest[accountListCursorPaginatedResponse](client, http.MethodGet, "/api/v1/accounts", acctQuery, nil)
-	if err2 != nil {
-		return 0, createError(httpResponse2, err2)
+	accountID := robotCtx.AccountID
+	if accountID == 0 {
+		acctQuery := url.Values{}
+		acctQuery.Set("Limit", "25")
+		acctResp, httpResponse2, err2 := performAuthenticatedJSONRequest[accountListCursorPaginatedResponse](client, http.MethodGet, "/api/v1/accounts", acctQuery, nil)
+		if err2 != nil {
+			return 0, createError(httpResponse2, err2)
+		}
+		if errorResp := checkResponse(httpResponse2, "list accounts"); errorResp != nil {
+			return 0, errorResp
+		}
+		if acctResp == nil || len(acctResp.Data) == 0 {
+			return 0, createJSONResponse(ErrorResponse{
+				Error: "could not resolve organizationId: pass organizationId explicitly or ensure at least one organization exists",
+			})
+		}
+		if len(acctResp.Data) > 1 {
+			return 0, createJSONResponse(ErrorResponse{
+				Error: "multiple accounts are visible to this Robot User; pass organizationId explicitly",
+			})
+		}
+		accountID = acctResp.Data[0].ID
 	}
-	if errorResp := checkResponse(httpResponse2, "list accounts"); errorResp != nil {
-		return 0, errorResp
-	}
-	if acctResp == nil || len(acctResp.Data) == 0 {
-		return 0, createJSONResponse(ErrorResponse{
-			Error: "could not resolve organizationId: pass organizationId explicitly or ensure at least one organization exists",
-		})
-	}
-	accountID := acctResp.Data[0].ID
+
 	orgQuery := url.Values{}
 	orgQuery.Set("AccountId", fmt.Sprintf("%d", accountID))
 	items, httpResponse3, err3 := performAuthenticatedJSONRequest[[]taikuncore.OrganizationDropdownDto](client, http.MethodGet, "/api/v1/organizations/list", orgQuery, nil)
@@ -90,6 +112,11 @@ func resolveOrganizationIDForCatalog(client *taikungoclient.Client, ctx context.
 	if items == nil || len(*items) == 0 {
 		return 0, createJSONResponse(ErrorResponse{
 			Error: "could not resolve organizationId: no organizations for this account — pass organizationId explicitly",
+		})
+	}
+	if len(*items) > 1 {
+		return 0, createJSONResponse(ErrorResponse{
+			Error: "multiple organizations are available for this account; pass organizationId explicitly",
 		})
 	}
 	return (*items)[0].GetId(), nil

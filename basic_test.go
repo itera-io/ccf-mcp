@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"os"
@@ -101,6 +102,34 @@ func TestCreateJSONResponseHelper(t *testing.T) {
 	}
 
 	t.Logf("✅ JSON Response: %s", content.TextContent.Text)
+}
+
+func TestResolveOrganizationIDForCatalogExplicitWins(t *testing.T) {
+	previous := getRobotUserContext()
+	setRobotUserContext(RobotUserContext{OrganizationID: 2090})
+	defer setRobotUserContext(previous)
+
+	orgID, errorResp := resolveOrganizationIDForCatalog(nil, context.Background(), 321)
+	if errorResp != nil {
+		t.Fatalf("expected no error response, got %#v", errorResp)
+	}
+	if orgID != 321 {
+		t.Fatalf("expected explicit organizationId 321, got %d", orgID)
+	}
+}
+
+func TestResolveOrganizationIDForCatalogPrefersRobotUserContext(t *testing.T) {
+	previous := getRobotUserContext()
+	setRobotUserContext(RobotUserContext{OrganizationID: 2090})
+	defer setRobotUserContext(previous)
+
+	orgID, errorResp := resolveOrganizationIDForCatalog(nil, context.Background(), 0)
+	if errorResp != nil {
+		t.Fatalf("expected no error response, got %#v", errorResp)
+	}
+	if orgID != 2090 {
+		t.Fatalf("expected robot user organizationId 2090, got %d", orgID)
+	}
 }
 
 func TestArgumentStructs(t *testing.T) {
