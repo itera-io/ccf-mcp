@@ -4,8 +4,9 @@ A Model Context Protocol (MCP) server for managing Cloudera Cloud Factory resour
 
 It supports project lifecycle operations, Kubernetes resources, application catalogs and installs, standalone VMs, cloud credentials, identity administration, backups, autoscaling, and related platform workflows.
 
-[![Release](https://img.shields.io/github/v/release/skotnicky/cloudera-cloud-factory-mcp)](https://github.com/skotnicky/cloudera-cloud-factory-mcp/releases)
-[![CI](https://github.com/skotnicky/cloudera-cloud-factory-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/skotnicky/cloudera-cloud-factory-mcp/actions/workflows/ci.yml)
+[![CI](https://github.com/skotnicky/cloudera-cloud-factory-mcp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/skotnicky/cloudera-cloud-factory-mcp/actions/workflows/ci.yml)
+[![Release Workflow](https://github.com/skotnicky/cloudera-cloud-factory-mcp/actions/workflows/release.yml/badge.svg)](https://github.com/skotnicky/cloudera-cloud-factory-mcp/actions/workflows/release.yml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/skotnicky/cloudera-cloud-factory-mcp)](https://github.com/skotnicky/cloudera-cloud-factory-mcp/blob/main/go.mod)
 [![Go Report Card](https://goreportcard.com/badge/github.com/skotnicky/cloudera-cloud-factory-mcp)](https://goreportcard.com/report/github.com/skotnicky/cloudera-cloud-factory-mcp)
 
 ## Highlights
@@ -24,6 +25,8 @@ It supports project lifecycle operations, Kubernetes resources, application cata
 ### Option 1: Download pre-built binaries
 
 Download the latest release from the [releases page](https://github.com/skotnicky/cloudera-cloud-factory-mcp/releases).
+
+The `latest` release is published automatically from the `main` branch and replaced on each new push, so only the newest packaged build is kept.
 
 #### Linux (x86_64)
 ```bash
