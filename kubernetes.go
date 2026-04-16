@@ -735,12 +735,12 @@ func fetchKubernetesListPage[T any](ctx context.Context, client *taikungoclient.
 	var result cursorPaginatedResponse[T]
 
 	if client == nil || client.Client == nil {
-		return result, nil, fmt.Errorf("Cloudera Cloud Factory client is not initialized")
+		return result, nil, fmt.Errorf("cloudera Cloud Factory client is not initialized")
 	}
 
 	cfg := client.Client.GetConfig()
 	if cfg == nil || cfg.HTTPClient == nil {
-		return result, nil, fmt.Errorf("Cloudera Cloud Factory client config is not available")
+		return result, nil, fmt.Errorf("cloudera Cloud Factory client config is not available")
 	}
 
 	baseURL := fmt.Sprintf("%s://%s", cfg.Scheme, cfg.Host)
@@ -772,7 +772,11 @@ func fetchKubernetesListPage[T any](ctx context.Context, client *taikungoclient.
 		return result, response, fmt.Errorf("request failed with status %d", response.StatusCode)
 	}
 
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			logger.Printf("Failed to close Kubernetes list response body: %v", err)
+		}
+	}()
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return result, response, err

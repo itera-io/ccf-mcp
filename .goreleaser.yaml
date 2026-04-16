@@ -57,7 +57,7 @@ checksum:
   name_template: 'checksums.txt'
 
 snapshot:
-  version_template: "{{ incpatch .Version }}-next"
+  version_template: '{{ if eq .Version "latest" }}0.0.1-next{{ else }}{{ incpatch .Version }}-next{{ end }}'
 
 changelog:
   sort: asc

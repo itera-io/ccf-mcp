@@ -101,7 +101,11 @@ func performAuthenticatedJSONRequest[T any](client *taikungoclient.Client, metho
 		return nil, httpResponse, nil
 	}
 
-	defer httpResponse.Body.Close()
+	defer func() {
+		if err := httpResponse.Body.Close(); err != nil {
+			logger.Printf("Failed to close HTTP response body: %v", err)
+		}
+	}()
 
 	var result T
 	if err := json.NewDecoder(httpResponse.Body).Decode(&result); err != nil {

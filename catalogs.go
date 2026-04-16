@@ -13,9 +13,9 @@ import (
 )
 
 type CreateCatalogArgs struct {
-	Name             string `json:"name" jsonschema:"required,description=The name of the catalog"`
-	Description      string `json:"description" jsonschema:"required,description=The description of the catalog"`
-	OrganizationID   int32  `json:"organizationId,omitempty" jsonschema:"description=Organization ID (required for Robot User / account-wide operations when the API enforces it)"`
+	Name           string `json:"name" jsonschema:"required,description=The name of the catalog"`
+	Description    string `json:"description" jsonschema:"required,description=The description of the catalog"`
+	OrganizationID int32  `json:"organizationId,omitempty" jsonschema:"description=Organization ID (required for Robot User / account-wide operations when the API enforces it)"`
 }
 
 type ListCatalogsArgs struct {
@@ -265,33 +265,6 @@ func listCatalogs(client *taikungoclient.Client, args ListCatalogsArgs) (*mcp_go
 	return createJSONResponse(listResp), nil
 }
 
-func updateCatalog(client *taikungoclient.Client, args UpdateCatalogArgs) (*mcp_golang.ToolResponse, error) {
-	ctx := context.Background()
-
-	editCmd := taikuncore.NewEditCatalogCommand()
-	editCmd.SetId(args.CatalogID)
-	editCmd.SetName(args.Name)
-	editCmd.SetDescription(args.Description)
-
-	response, err := client.Client.CatalogAPI.CatalogEdit(ctx).
-		EditCatalogCommand(*editCmd).
-		Execute()
-
-	if err != nil {
-		return createError(response, err), nil
-	}
-
-	if errorResp := checkResponse(response, "update catalog"); errorResp != nil {
-		return errorResp, nil
-	}
-
-	successResp := SuccessResponse{
-		Message: fmt.Sprintf("Catalog ID %d updated successfully", args.CatalogID),
-		Success: true,
-	}
-	return createJSONResponse(successResp), nil
-}
-
 func deleteCatalog(client *taikungoclient.Client, args DeleteCatalogArgs) (*mcp_golang.ToolResponse, error) {
 	ctx := context.Background()
 
@@ -376,31 +349,6 @@ func buildCreateCatalogAppCommand(catalogID int32, repository, packageName, vers
 	return createCmd
 }
 
-func addAppToCatalog(client *taikungoclient.Client, args AddAppToCatalogArgs) (*mcp_golang.ToolResponse, error) {
-	ctx := context.Background()
-
-	createCmd := buildCreateCatalogAppCommand(args.CatalogID, args.Repository, args.PackageName, args.Version, nil)
-
-	_, response, err := client.Client.CatalogAppAPI.CatalogAppCreate(ctx).
-		CreateCatalogAppCommand(*createCmd).
-		Execute()
-
-	if err != nil {
-		return createError(response, err), nil
-	}
-
-	if errorResp := checkResponse(response, "add application to catalog"); errorResp != nil {
-		return errorResp, nil
-	}
-
-	successResp := SuccessResponse{
-		Message: fmt.Sprintf("Application '%s' from repository '%s' added to catalog ID %d", args.PackageName, args.Repository, args.CatalogID),
-		Success: true,
-	}
-
-	return createJSONResponse(successResp), nil
-}
-
 func addAppToCatalogWithParameters(client *taikungoclient.Client, args AddAppToCatalogWithParametersArgs) (*mcp_golang.ToolResponse, error) {
 	ctx := context.Background()
 
@@ -420,88 +368,6 @@ func addAppToCatalogWithParameters(client *taikungoclient.Client, args AddAppToC
 
 	successResp := SuccessResponse{
 		Message: fmt.Sprintf("Application '%s' from repository '%s' added to catalog ID %d with %d parameter overrides", args.PackageName, args.Repository, args.CatalogID, len(args.Parameters)),
-		Success: true,
-	}
-
-	return createJSONResponse(successResp), nil
-}
-
-func removeAppFromCatalog(client *taikungoclient.Client, args RemoveAppFromCatalogArgs) (*mcp_golang.ToolResponse, error) {
-	ctx := context.Background()
-
-	// Get the catalog apps to find the specific app to delete
-	req := client.Client.CatalogAppAPI.CatalogAppList(ctx).CatalogId(args.CatalogID)
-	if args.PackageName != "" {
-		req = req.Search(args.PackageName)
-	}
-
-	catalogAppList, response, err := req.Execute()
-	if err != nil {
-		return createError(response, err), nil
-	}
-
-	if errorResp := checkResponse(response, "list catalog applications"); errorResp != nil {
-		return errorResp, nil
-	}
-
-	// Find the specific app to delete
-	var appToDelete *taikuncore.CatalogAppListDto
-	if catalogAppList != nil && len(catalogAppList.Data) > 0 {
-		for _, app := range catalogAppList.Data {
-			// Check package name (using PackageId field)
-			packageMatches := false
-			if app.GetName() != "" {
-				packageMatches = app.GetName() == args.PackageName
-			}
-
-			// Check repository name if provided
-			repoMatches := true // Default to true if no repository filter
-			if args.Repository != "" {
-				repoMatches = false
-				if app.RepoName.IsSet() && app.RepoName.Get() != nil {
-					repoMatches = *app.RepoName.Get() == args.Repository
-				}
-			}
-
-			if packageMatches && repoMatches {
-				appToDelete = &app
-				break
-			}
-		}
-	}
-
-	if appToDelete == nil {
-		var errorMsg string
-		if args.Repository != "" {
-			errorMsg = fmt.Sprintf("Application '%s' from repository '%s' not found in catalog ID %d", args.PackageName, args.Repository, args.CatalogID)
-		} else {
-			errorMsg = fmt.Sprintf("Application '%s' not found in catalog ID %d", args.PackageName, args.CatalogID)
-		}
-		errorResp := ErrorResponse{
-			Error: errorMsg,
-		}
-		return createJSONResponse(errorResp), nil
-	}
-
-	// Delete the application
-	deleteResponse, err := client.Client.CatalogAppAPI.CatalogAppDelete(ctx, *appToDelete.CatalogAppId).Execute()
-	if err != nil {
-		return createError(deleteResponse, err), nil
-	}
-
-	if errorResp := checkResponse(deleteResponse, "remove application from catalog"); errorResp != nil {
-		return errorResp, nil
-	}
-
-	var successMsg string
-	if args.Repository != "" {
-		successMsg = fmt.Sprintf("Application '%s' from repository '%s' removed from catalog ID %d", args.PackageName, args.Repository, args.CatalogID)
-	} else {
-		successMsg = fmt.Sprintf("Application '%s' removed from catalog ID %d", args.PackageName, args.CatalogID)
-	}
-
-	successResp := SuccessResponse{
-		Message: successMsg,
 		Success: true,
 	}
 
@@ -899,145 +765,6 @@ func fetchAvailablePackages(client *taikungoclient.Client, search string, startO
 		total = len(allPackages)
 	}
 	return allPackages, total, nil
-}
-
-func listAvailablePackages(client *taikungoclient.Client, args ListAvailablePackagesArgs) (*mcp_golang.ToolResponse, error) {
-	ctx := context.Background()
-
-	// Prepare response data
-	type PackageInfo struct {
-		Name        string `json:"name"`
-		Repository  string `json:"repository"`
-		Version     string `json:"version,omitempty"`
-		Description string `json:"description,omitempty"`
-		AppVersion  string `json:"appVersion,omitempty"`
-		Stars       int64  `json:"stars,omitempty"`
-		Deprecated  bool   `json:"deprecated,omitempty"`
-	}
-
-	mapPackageInfo := func(pkg taikuncore.AvailablePackagesDto) PackageInfo {
-		packageInfo := PackageInfo{}
-
-		if pkg.Name.IsSet() && pkg.Name.Get() != nil {
-			packageInfo.Name = *pkg.Name.Get()
-		}
-		if pkg.Repository != nil && pkg.Repository.Name.IsSet() && pkg.Repository.Name.Get() != nil {
-			packageInfo.Repository = *pkg.Repository.Name.Get()
-		}
-		if pkg.Version.IsSet() && pkg.Version.Get() != nil {
-			packageInfo.Version = *pkg.Version.Get()
-		}
-		if pkg.Description.IsSet() && pkg.Description.Get() != nil {
-			packageInfo.Description = *pkg.Description.Get()
-		}
-		if pkg.AppVersion.IsSet() && pkg.AppVersion.Get() != nil {
-			packageInfo.AppVersion = *pkg.AppVersion.Get()
-		}
-		if pkg.Stars != nil {
-			packageInfo.Stars = *pkg.Stars
-		}
-		if pkg.Deprecated != nil {
-			packageInfo.Deprecated = *pkg.Deprecated
-		}
-		return packageInfo
-	}
-
-	if args.Repository == "" && args.Limit > 0 {
-		req := client.Client.PackageAPI.PackageList(ctx).
-			Limit(args.Limit)
-		if args.Offset > 0 {
-			req = req.Offset(args.Offset)
-		}
-		if args.Search != "" {
-			req = req.Search(args.Search)
-		}
-
-		packageList, response, err := req.Execute()
-		if err != nil {
-			return createError(response, err), nil
-		}
-		if errorResp := checkResponse(response, "list available packages"); errorResp != nil {
-			return errorResp, nil
-		}
-
-		packages := []PackageInfo{}
-		total := 0
-		if packageList != nil {
-			total = int(packageList.GetTotalCount())
-			for _, pkg := range packageList.Data {
-				packages = append(packages, mapPackageInfo(pkg))
-			}
-		}
-		if total == 0 {
-			total = len(packages)
-		}
-
-		message := fmt.Sprintf("Found %d available packages", total)
-		if total == 0 {
-			message = "No packages found"
-		} else if len(packages) == 0 {
-			message = fmt.Sprintf("No packages found on the requested page (total matches: %d)", total)
-		}
-
-		listResp := struct {
-			Packages []PackageInfo `json:"packages"`
-			Total    int           `json:"total"`
-			Message  string        `json:"message"`
-		}{
-			Packages: packages,
-			Total:    total,
-			Message:  message,
-		}
-
-		return createJSONResponse(listResp), nil
-	}
-
-	startOffset := int32(0)
-	if args.Repository == "" && args.Offset > 0 {
-		startOffset = args.Offset
-	}
-	allPackages, total, errorResp := fetchAvailablePackages(client, args.Search, startOffset)
-	if errorResp != nil {
-		return errorResp, nil
-	}
-
-	var packages []PackageInfo
-	for _, pkg := range allPackages {
-		packageInfo := mapPackageInfo(pkg)
-
-		if args.Repository != "" && packageInfo.Repository != args.Repository {
-			continue
-		}
-
-		packages = append(packages, packageInfo)
-	}
-
-	packagedPage := packages
-	if args.Repository != "" {
-		total = len(packages)
-		packagedPage = applyOffsetLimit(packages, args.Offset, args.Limit)
-	}
-	message := fmt.Sprintf("Found %d available packages", total)
-	if total == 0 {
-		message = "No packages found"
-	} else if len(packagedPage) == 0 {
-		message = fmt.Sprintf("No packages found on the requested page (total matches: %d)", total)
-	}
-	if args.Repository != "" {
-		message += fmt.Sprintf(" in repository '%s'", args.Repository)
-	}
-
-	listResp := struct {
-		Packages []PackageInfo `json:"packages"`
-		Total    int           `json:"total"`
-		Message  string        `json:"message"`
-	}{
-		Packages: packagedPage,
-		Total:    total,
-		Message:  message,
-	}
-
-	return createJSONResponse(listResp), nil
 }
 
 func listAvailableApps(client *taikungoclient.Client, args ListAvailableAppsArgs) (*mcp_golang.ToolResponse, error) {

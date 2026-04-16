@@ -289,7 +289,11 @@ func getStandaloneVMWindowsPassword(client *taikungoclient.Client, args Standalo
 				Details: err.Error(),
 			}), nil
 		}
-		defer file.Close()
+		defer func() {
+			if err := file.Close(); err != nil {
+				logger.Printf("Failed to close standalone VM config file %q: %v", args.ConfigPath, err)
+			}
+		}()
 		req = req.Config(file)
 	}
 
