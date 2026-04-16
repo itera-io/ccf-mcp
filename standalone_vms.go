@@ -4,10 +4,16 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/itera-io/taikungoclient"
 	taikuncore "github.com/itera-io/taikungoclient/client"
 	mcp_golang "github.com/metoro-io/mcp-golang"
+)
+
+const (
+	defaultStandaloneVMVolumeSizeGiB int64 = 10
+	windowsStandaloneVMVolumeHintGiB int64 = 50
 )
 
 type StandaloneWindowsPasswordArgs struct {
@@ -98,10 +104,59 @@ func createStandaloneVM(client *taikungoclient.Client, args JSONPayloadArgs) (*m
 		return errorResp, nil
 	}
 
+	volumeSizeDefaulted, windowsVolumeHint := applyCreateStandaloneVMDefaults(command)
+
 	apiResp, httpResponse, err := client.Client.StandaloneAPI.StandaloneCreate(context.Background()).
 		CreateStandAloneVmCommand(*command).
 		Execute()
-	return finalizeAPIOperation(apiResp, httpResponse, err, "create standalone VM", "Standalone VM created successfully")
+	if err != nil {
+		return apiErrorInfoFromResponse(httpResponse, err).toolResponse(), nil
+	}
+	if errorResp := checkResponse(httpResponse, "create standalone VM"); errorResp != nil {
+		return errorResp, nil
+	}
+
+	message := "Standalone VM created successfully"
+	if apiResp != nil && apiResp.GetMessage() != "" {
+		message = apiResp.GetMessage()
+	}
+
+	resp := map[string]interface{}{
+		"message":         message,
+		"success":         true,
+		"volumeSizeGiB":   command.GetVolumeSize(),
+		"volumeDefaulted": volumeSizeDefaulted,
+	}
+	if apiResp != nil && apiResp.GetId() != "" {
+		resp["id"] = apiResp.GetId()
+	}
+	if apiResp != nil && apiResp.Result != nil {
+		resp["result"] = apiResp.Result
+	}
+	if windowsVolumeHint != "" {
+		resp["hint"] = windowsVolumeHint
+	}
+
+	return createJSONResponse(resp), nil
+}
+
+func applyCreateStandaloneVMDefaults(command *taikuncore.CreateStandAloneVmCommand) (bool, string) {
+	if command == nil {
+		return false, ""
+	}
+
+	volumeSizeDefaulted := false
+	if command.VolumeSize == nil || *command.VolumeSize <= 0 {
+		command.SetVolumeSize(defaultStandaloneVMVolumeSizeGiB)
+		volumeSizeDefaulted = true
+	}
+
+	image, ok := command.GetImageOk()
+	if ok && strings.Contains(strings.ToLower(*image), "windows") {
+		return volumeSizeDefaulted, fmt.Sprintf("Windows images typically need a %d GiB root volume; consider setting volumeSize explicitly.", windowsStandaloneVMVolumeHintGiB)
+	}
+
+	return volumeSizeDefaulted, ""
 }
 
 func deleteStandaloneVM(client *taikungoclient.Client, args DeleteStandaloneVMArgs) (*mcp_golang.ToolResponse, error) {

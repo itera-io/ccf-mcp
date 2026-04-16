@@ -1252,7 +1252,7 @@ func main() {
 	mustRegisterScopedTool(server, "get-standalone-vm-details", "Get standalone VM details", func(args ProjectSearchListArgs) (*mcp_golang.ToolResponse, error) {
 		return getStandaloneVMDetails(taikunClient, args)
 	})
-	mustRegisterScopedTool(server, "create-standalone-vm", "Create a standalone VM (payload: CreateStandAloneVmCommand). You can batch multiple VM changes and then call commit-project once for the project; for VM-only projects, commit-project automatically falls back to the VM commit endpoint used by the UI when needed.", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+	mustRegisterScopedTool(server, "create-standalone-vm", "Create a standalone VM (payload: CreateStandAloneVmCommand). The image field expects the provider image ID (for example an AWS AMI ID), not the display name. If payload omits volumeSize, the tool defaults it to 10 GiB; for Windows images, prefer 50 GiB. You can batch multiple VM changes and then call commit-project once for the project; for VM-only projects, commit-project automatically falls back to the VM commit endpoint used by the UI when needed.", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
 		return createStandaloneVM(taikunClient, args)
 	})
 	mustRegisterScopedTool(server, "delete-standalone-vm", "Queue deletion of a standalone VM from a project. You can batch this with other VM changes and then call commit-project once for the project to apply the deletion.", func(args DeleteStandaloneVMArgs) (*mcp_golang.ToolResponse, error) {
