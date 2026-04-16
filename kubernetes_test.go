@@ -36,3 +36,19 @@ func TestNormalizeKubeConfigRoleIDPreservesNonAWSRoleSelection(t *testing.T) {
 		t.Fatalf("expected non-AWS role selection to be preserved, got %d", roleID)
 	}
 }
+
+func TestParseInt32RejectsOutOfRangeValues(t *testing.T) {
+	if got := parseInt32("2147483647"); got != 2147483647 {
+		t.Fatalf("expected max int32 to parse, got %d", got)
+	}
+	if got := parseInt32("2147483648"); got != 0 {
+		t.Fatalf("expected out-of-range int32 parse to return 0, got %d", got)
+	}
+}
+
+func TestParseReadyCountsRejectsOutOfRangeValues(t *testing.T) {
+	ready, total := parseReadyCounts("12/2147483648")
+	if ready != 0 || total != 0 {
+		t.Fatalf("expected out-of-range ready counts to return 0/0, got %d/%d", ready, total)
+	}
+}

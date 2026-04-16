@@ -276,23 +276,31 @@ func parseReadyCounts(ready string) (int32, int32) {
 	if len(parts) != 2 {
 		return 0, 0
 	}
-	readyCount, err := strconv.Atoi(strings.TrimSpace(parts[0]))
-	if err != nil {
+	readyCount, ok := parseInt32Strict(parts[0])
+	if !ok {
 		return 0, 0
 	}
-	totalCount, err := strconv.Atoi(strings.TrimSpace(parts[1]))
-	if err != nil {
+	totalCount, ok := parseInt32Strict(parts[1])
+	if !ok {
 		return 0, 0
 	}
-	return int32(readyCount), int32(totalCount)
+	return readyCount, totalCount
 }
 
 func parseInt32(value string) int32 {
-	parsed, err := strconv.Atoi(strings.TrimSpace(value))
-	if err != nil {
+	parsed, ok := parseInt32Strict(value)
+	if !ok {
 		return 0
 	}
-	return int32(parsed)
+	return parsed
+}
+
+func parseInt32Strict(value string) (int32, bool) {
+	parsed, err := strconv.ParseInt(strings.TrimSpace(value), 10, 32)
+	if err != nil {
+		return 0, false
+	}
+	return int32(parsed), true
 }
 
 func isLikelyKubernetesYaml(payload string) bool {
