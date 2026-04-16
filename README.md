@@ -1,100 +1,136 @@
 # Cloudera Cloud Factory MCP Server
 
-A Model Context Protocol (MCP) server that provides tools for managing Cloudera Cloud Factory resources (formerly Taikun), including projects, virtual clusters, catalogs, and applications.
+A Model Context Protocol (MCP) server for managing Cloudera Cloud Factory resources from MCP-capable clients such as Claude Desktop and Cursor.
 
-Note: The repository name remains `cloudera-cloud-factory-mcp` for compatibility; the binary is now `cloudera-cloud-factory-mcp`.
+It supports project lifecycle operations, Kubernetes resources, application catalogs and installs, standalone VMs, cloud credentials, identity administration, backups, autoscaling, and related platform workflows.
 
-[![Release](https://img.shields.io/github/v/release/itera-io/cloudera-cloud-factory-mcp)](https://github.com/itera-io/cloudera-cloud-factory-mcp/releases)
-[![CI](https://github.com/itera-io/cloudera-cloud-factory-mcp/workflows/CI/badge.svg)](https://github.com/itera-io/cloudera-cloud-factory-mcp/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/itera-io/cloudera-cloud-factory-mcp)](https://goreportcard.com/report/github.com/itera-io/cloudera-cloud-factory-mcp)
+[![Release](https://img.shields.io/github/v/release/skotnicky/cloudera-cloud-factory-mcp)](https://github.com/skotnicky/cloudera-cloud-factory-mcp/releases)
+[![CI](https://github.com/skotnicky/cloudera-cloud-factory-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/skotnicky/cloudera-cloud-factory-mcp/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/skotnicky/cloudera-cloud-factory-mcp)](https://goreportcard.com/report/github.com/skotnicky/cloudera-cloud-factory-mcp)
+
+## Highlights
+
+- Robot User authentication with scope-aware authorization
+- Structured JSON responses for all tools
+- Project and virtual cluster management
+- Kubernetes deployment, patch, delete, and kubeconfig workflows
+- Catalog, repository, and application lifecycle management
+- Standalone VM, disk, IP, and profile management
+- Cloud credential, image, flavor, and server management
+- Identity, access profile, alerting, backup, autoscaling, and policy tooling
 
 ## Installation
 
-### Option 1: Download Pre-built Binaries (Recommended)
+### Option 1: Download pre-built binaries
 
-Download the latest release for your platform from the [releases page](https://github.com/itera-io/cloudera-cloud-factory-mcp/releases).
+Download the latest release from the [releases page](https://github.com/skotnicky/cloudera-cloud-factory-mcp/releases).
 
 #### Linux (x86_64)
 ```bash
-curl -L https://github.com/itera-io/cloudera-cloud-factory-mcp/releases/latest/download/cloudera-cloud-factory-mcp_Linux_x86_64.tar.gz | tar xz
+curl -L https://github.com/skotnicky/cloudera-cloud-factory-mcp/releases/latest/download/cloudera-cloud-factory-mcp_Linux_x86_64.tar.gz | tar xz
 sudo mv cloudera-cloud-factory-mcp /usr/local/bin/
 ```
 
 #### macOS (Intel)
 ```bash
-curl -L https://github.com/itera-io/cloudera-cloud-factory-mcp/releases/latest/download/cloudera-cloud-factory-mcp_Darwin_x86_64.tar.gz | tar xz
+curl -L https://github.com/skotnicky/cloudera-cloud-factory-mcp/releases/latest/download/cloudera-cloud-factory-mcp_Darwin_x86_64.tar.gz | tar xz
 sudo mv cloudera-cloud-factory-mcp /usr/local/bin/
 ```
 
 #### macOS (Apple Silicon)
 ```bash
-curl -L https://github.com/itera-io/cloudera-cloud-factory-mcp/releases/latest/download/cloudera-cloud-factory-mcp_Darwin_arm64.tar.gz | tar xz
+curl -L https://github.com/skotnicky/cloudera-cloud-factory-mcp/releases/latest/download/cloudera-cloud-factory-mcp_Darwin_arm64.tar.gz | tar xz
 sudo mv cloudera-cloud-factory-mcp /usr/local/bin/
 ```
 
 #### Windows (PowerShell)
 ```powershell
-Invoke-WebRequest -Uri "https://github.com/itera-io/cloudera-cloud-factory-mcp/releases/latest/download/cloudera-cloud-factory-mcp_Windows_x86_64.zip" -OutFile "cloudera-cloud-factory-mcp.zip"
+Invoke-WebRequest -Uri "https://github.com/skotnicky/cloudera-cloud-factory-mcp/releases/latest/download/cloudera-cloud-factory-mcp_Windows_x86_64.zip" -OutFile "cloudera-cloud-factory-mcp.zip"
 Expand-Archive -Path "cloudera-cloud-factory-mcp.zip" -DestinationPath .
-# Move cloudera-cloud-factory-mcp.exe to your PATH
+# Move cloudera-cloud-factory-mcp.exe to a directory on your PATH
 ```
 
-### Option 2: Build from Source
+### Option 2: Build from source
 
 #### Prerequisites
-- Go 1.24 or later
-- Cloudera Cloud Factory account with API access
+
+- Go 1.25 or later
+- Cloudera Cloud Factory Robot User credentials
 
 ```bash
-git clone https://github.com/itera-io/cloudera-cloud-factory-mcp
+git clone https://github.com/skotnicky/cloudera-cloud-factory-mcp
 cd cloudera-cloud-factory-mcp
-go build -o cloudera-cloud-factory-mcp
+go build -o cloudera-cloud-factory-mcp .
 ```
 
-### Option 3: Using Go Install
+### Option 3: Install with Go
 
 ```bash
-go install github.com/itera-io/cloudera-cloud-factory-mcp@latest
+go install github.com/skotnicky/cloudera-cloud-factory-mcp@latest
 ```
 
 ## Configuration
 
-The server authenticates to the Cloudera Cloud Factory API with **Robot User** credentials. Use the legacy `TAIKUN_*` environment variable names expected by the upstream Go client.
+The server authenticates with **Robot User** credentials only. Use the legacy `TAIKUN_*` environment variable names expected by the upstream Go client.
 
 ```bash
 export TAIKUN_ACCESS_KEY="your-robot-user-access-key"
 export TAIKUN_SECRET_KEY="your-robot-user-secret-key"
-export TAIKUN_API_HOST="api-latest.osc1.sjc.cloudera.com"  # Optional, defaults to api-latest.osc1.sjc.cloudera.com
-export TAIKUN_DOMAIN_NAME=""  # Optional, only set if your environment requires it
+export TAIKUN_API_HOST="api-latest.osc1.sjc.cloudera.com"  # Optional
+export TAIKUN_DOMAIN_NAME=""                               # Optional
 ```
 
-### Environment File
+### Important authentication notes
 
-You can also create a `.env` file:
+- Email/password authentication is no longer supported by this server.
+- If `TAIKUN_AUTH_MODE` is set, it is ignored.
+- If `TAIKUN_API_HOST` is not set, the server defaults to `api-latest.osc1.sjc.cloudera.com`.
+
+### Using a `.env` file
+
+The binary does not automatically load `.env` files on startup. You can either export the variables in your shell or use the included helper target:
 
 ```bash
-TAIKUN_ACCESS_KEY=your-robot-user-access-key
-TAIKUN_SECRET_KEY=your-robot-user-secret-key
-TAIKUN_API_HOST=api-latest.osc1.sjc.cloudera.com
-# Optional:
-# TAIKUN_DOMAIN_NAME=your-domain-name
+cp .env.example .env
+make run-env
+```
+
+Equivalent manual shell usage:
+
+```bash
+set -a
+source .env
+set +a
+./cloudera-cloud-factory-mcp
 ```
 
 ## Usage
 
-### Starting the Server
+### Start the server
 
 ```bash
 ./cloudera-cloud-factory-mcp
 ```
 
-The server will start and listen for MCP requests via stdio transport.
+The server communicates over MCP stdio transport.
 
-When running with Robot User credentials, the server reads the current Robot User identity and assigned scopes from the API and exposes them via the `robot-user-capabilities` MCP tool. For tools with a known scope mapping, the server will fail fast with a clear JSON error if the Robot User lacks the required scope.
+### Print version information
 
-### Connecting from Claude Desktop
+```bash
+./cloudera-cloud-factory-mcp --version
+```
 
-Add this configuration to your Claude Desktop config:
+### Logs
+
+Runtime logs are written to:
+
+```text
+/tmp/cloudera_cloud_factory_mcp_server.log
+```
+
+## MCP client configuration
+
+### Claude Desktop
 
 ```json
 {
@@ -111,9 +147,48 @@ Add this configuration to your Claude Desktop config:
 }
 ```
 
+Any MCP client that can launch a stdio server can use the same binary and environment variables.
+
+## Tool coverage
+
+The server currently exposes tooling across these areas:
+
+- Project management: create, list, inspect, commit, wait, and delete projects
+- Virtual clusters: create, list, and delete virtual clusters
+- Kubernetes: deploy YAML, patch resources, list resources, create or fetch kubeconfigs
+- Cluster nodes and servers: add servers to projects, list them, and remove them
+- Standalone VMs: create, inspect, manage IPs, operate power state, manage disks, and retrieve console/RDP/password metadata
+- Standalone VM profiles: create, update, lock, and manage profile security group rules
+- Applications and catalogs: repositories, catalog apps, installs, sync, uninstall, and wait flows
+- Images and flavors: list, inspect, and bind images or flavors to projects
+- Cloud credentials: list plus create or update provider-specific credentials
+- Identity and access: domains, organizations, users, identity groups, and access profiles
+- Platform services: alerting, backups, monitoring, AI assistant, policy, and spot settings
+- Autoscaling: enable, inspect, update, and disable autoscaling
+
+## Behavior notes
+
+- `robot-user-capabilities` shows the current Robot User identity, scopes, and tool access.
+- Scope-aware tools fail fast with a structured JSON error when the Robot User lacks required access.
+- All tool responses are JSON, not free-form text.
+- After adding Kubernetes servers or making standalone VM changes, call `commit-project` to provision them.
+- Standalone VM workflows may require binding images and flavors to the project first.
+- In general, user requests for a "VM" or "server" map to standalone VM workflows, while "node" usually means adding capacity to a Kubernetes cluster.
+
+## Development
+
+Common local commands:
+
+```bash
+go test -v ./...
+go build -o cloudera-cloud-factory-mcp .
+make test
+make test-all
+make lint
+```
+
 ## Support
 
-For issues and questions:
 - Create an issue in this repository
 - Check the [Cloudera Cloud Factory documentation](https://docs.taikun.cloud/)
 - Review the [MCP specification](https://modelcontextprotocol.io/)
