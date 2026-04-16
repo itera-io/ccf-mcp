@@ -61,3 +61,4 @@ debug
 *.pprof
 *.kubeconfig
 *kubeconfig*
+ccf.code-workspace
