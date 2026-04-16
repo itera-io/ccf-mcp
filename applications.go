@@ -3,11 +3,15 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"sort"
 	"time"
 
 	"github.com/itera-io/taikungoclient"
 	taikuncore "github.com/itera-io/taikungoclient/client"
 	mcp_golang "github.com/metoro-io/mcp-golang"
+	"github.com/tidwall/gjson"
 )
 
 type AppParameter struct {
@@ -16,17 +20,20 @@ type AppParameter struct {
 }
 
 type InstallAppArgs struct {
-	Name              string         `json:"name" jsonschema:"required,description=The name of the application instance"`
-	Namespace         string         `json:"namespace" jsonschema:"required,description=The namespace to install the application in"`
-	ProjectID         int32          `json:"projectId" jsonschema:"required,description=The project ID to install the application in"`
-	CatalogAppID      int32          `json:"catalogAppId" jsonschema:"required,description=The catalog application ID to install"`
-	ExtraValues       string         `json:"extraValues,omitempty" jsonschema:"description=Base64-encoded YAML extra values for the application (optional)"`
-	AutoSync          bool           `json:"autoSync,omitempty" jsonschema:"description=Enable automatic synchronization (default: false)"`
-	TaikunLinkEnabled bool           `json:"taikunLinkEnabled,omitempty" jsonschema:"description=Enable Taikun link integration (default: false)"`
-	Timeout           int32          `json:"timeout,omitempty" jsonschema:"description=Installation timeout in seconds (optional)"`
-	Parameters        []AppParameter `json:"parameters,omitempty" jsonschema:"description=Application parameters as key-value pairs (optional)"`
-	WaitForReady      bool           `json:"waitForReady,omitempty" jsonschema:"description=Wait for application to be ready before returning (default: false)"`
-	WaitTimeout       int32          `json:"waitTimeout,omitempty" jsonschema:"description=Wait timeout in seconds (default: 600)"`
+	Name                      string         `json:"name" jsonschema:"required,description=The name of the application instance"`
+	Namespace                 string         `json:"namespace" jsonschema:"required,description=The namespace to install the application in"`
+	ProjectID                 int32          `json:"projectId" jsonschema:"required,description=The project ID to install the application in"`
+	CatalogAppID              int32          `json:"catalogAppId" jsonschema:"required,description=The catalog application ID to install"`
+	ExtraValues               string         `json:"extraValues,omitempty" jsonschema:"description=Base64-encoded YAML extra values for the application (optional)"`
+	AutoSync                  bool           `json:"autoSync,omitempty" jsonschema:"description=Enable automatic synchronization (default: false)"`
+	TaikunLinkEnabled         bool           `json:"taikunLinkEnabled,omitempty" jsonschema:"description=Enable Cloudera Cloud Factory (Taikun) link integration (default: false)"`
+	Timeout                   int32          `json:"timeout,omitempty" jsonschema:"description=Installation timeout in seconds (optional)"`
+	Parameters                []AppParameter `json:"parameters,omitempty" jsonschema:"description=Application parameters as key-value pairs (optional)"`
+	UseCatalogDefaults        *bool          `json:"useCatalogDefaults,omitempty" jsonschema:"description=Use catalog default parameters as a base (default: true)"`
+	WaitForReady              bool           `json:"waitForReady,omitempty" jsonschema:"description=Wait for application to be ready before returning (default: false)"`
+	WaitTimeout               int32          `json:"waitTimeout,omitempty" jsonschema:"description=Wait timeout in seconds (default: 600)"`
+	ReadyStabilizationSeconds int32          `json:"readyStabilizationSeconds,omitempty" jsonschema:"description=Seconds the app must remain in Ready state before success (default: 30)"`
+	RetrySyncOnFailure        bool           `json:"retrySyncOnFailure,omitempty" jsonschema:"description=If wait detects Failed status, run one sync retry and wait again (default: false)"`
 }
 
 type ListAppsArgs struct {
@@ -51,52 +58,128 @@ type UninstallAppArgs struct {
 	ProjectAppID int32 `json:"projectAppId" jsonschema:"required,description=The project application ID to uninstall"`
 }
 
-// waitForAppReady waits for an application to reach READY status
-func waitForAppReady(client *taikungoclient.Client, projectAppID int32, timeoutSeconds int32) error {
+// waitForAppReady waits for an application to reach READY status or be deleted
+func waitForAppReady(client *taikungoclient.Client, projectAppID int32, timeoutSeconds int32, waitDeleted bool, readyStabilizationSeconds int32) error {
 	ctx := context.Background()
 	timeout := time.Duration(timeoutSeconds) * time.Second
 	if timeoutSeconds == 0 {
-		timeout = 10 * time.Minute // Default 10 minutes like Terraform provider
+		timeout = 60 * time.Second // Default 60 seconds
+		if waitDeleted {
+			timeout = 30 * time.Second // Default 30 seconds
+		}
 	}
 
+	readyStabilization := time.Duration(readyStabilizationSeconds) * time.Second
+	if readyStabilizationSeconds <= 0 {
+		readyStabilization = 30 * time.Second
+	}
+
+	var readySince time.Time
 	start := time.Now()
 	for {
 		// Check if we've exceeded the timeout
 		if time.Since(start) > timeout {
-			return fmt.Errorf("timeout waiting for application ID %d to be ready after %v", projectAppID, timeout)
+			return fmt.Errorf("timeout waiting for application ID %d after %v", projectAppID, timeout)
 		}
 
-		// Query the application status
-		appDetails, response, err := client.Client.ProjectAppsAPI.ProjectappDetails(ctx, projectAppID).Execute()
+		status, found, response, err := fetchProjectAppStatus(ctx, client, projectAppID)
+		if response != nil && (response.StatusCode < 200 || response.StatusCode >= 300) && response.StatusCode != http.StatusNotFound {
+			return taikungoclient.CreateError(response, err)
+		}
 		if err != nil {
 			return fmt.Errorf("error checking application status: %v", err)
 		}
 
-		if response.StatusCode < 200 || response.StatusCode >= 300 {
-			return fmt.Errorf("HTTP error checking application status: %d", response.StatusCode)
+		if !found {
+			if waitDeleted {
+				return nil // App is gone, which is what we wanted
+			}
+			return fmt.Errorf("application ID %d not found in project", projectAppID)
 		}
 
-		if appDetails != nil {
-			status := string(appDetails.GetStatus())
+		if waitDeleted {
+			logger.Printf("Application ID %d still exists - Status: %s", projectAppID, status)
+		} else {
 			logger.Printf("Application ID %d status: %s", projectAppID, status)
 
-			// Check if app is ready
+			// Mark ready only after a short stabilization window to avoid
+			// transient "Ready" states where dependent resources fail moments later.
 			if status == "Ready" {
-				return nil // Success!
+				if readySince.IsZero() {
+					readySince = time.Now()
+					logger.Printf("Application ID %d reached Ready, starting stabilization window (%v)", projectAppID, readyStabilization)
+				}
+				if time.Since(readySince) >= readyStabilization {
+					return nil // Success after stabilization
+				}
+			} else {
+				readySince = time.Time{}
 			}
 
 			// Check for failure states
 			if status == "Failed" {
 				return fmt.Errorf("application ID %d installation failed - status: %s", projectAppID, status)
 			}
-
-			// Continue polling if still installing/pending
-			// Valid pending states: "NONE", "NOT_READY", "INSTALLING", "UNINSTALLING"
 		}
 
 		// Wait before next poll
 		time.Sleep(10 * time.Second)
 	}
+}
+
+func fetchProjectAppStatus(ctx context.Context, client *taikungoclient.Client, projectAppID int32) (string, bool, *http.Response, error) {
+	appDetails, response, err := client.Client.ProjectAppsAPI.ProjectappDetails(ctx, projectAppID).Execute()
+	if err == nil && appDetails != nil {
+		return string(appDetails.GetStatus()), true, response, nil
+	}
+
+	if response != nil {
+		if response.StatusCode == http.StatusNotFound {
+			return "", false, response, nil
+		}
+		if response.StatusCode >= 300 {
+			return "", false, response, err
+		}
+	}
+
+	if response != nil && response.Body != nil {
+		bodyBytes, readErr := io.ReadAll(response.Body)
+		if readErr == nil {
+			body := string(bodyBytes)
+			if statusResult := gjson.Get(body, "status"); statusResult.Exists() {
+				return statusResult.String(), true, response, nil
+			}
+			if statusResult := gjson.Get(body, "data.status"); statusResult.Exists() {
+				return statusResult.String(), true, response, nil
+			}
+		}
+	}
+
+	return "", false, response, err
+}
+
+func syncProjectApp(client *taikungoclient.Client, projectAppID int32, timeout int32) error {
+	ctx := context.Background()
+
+	syncCmd := taikuncore.NewSyncProjectAppCommand()
+	syncCmd.SetProjectAppId(projectAppID)
+	if timeout > 0 {
+		syncCmd.SetTimeout(timeout)
+	}
+
+	response, err := client.Client.ProjectAppsAPI.ProjectappSync(ctx).
+		SyncProjectAppCommand(*syncCmd).
+		Execute()
+	if err != nil {
+		return taikungoclient.CreateError(response, err)
+	}
+	if response == nil {
+		return fmt.Errorf("no response received while syncing application ID %d", projectAppID)
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return taikungoclient.CreateError(response, fmt.Errorf("sync application returned status %d", response.StatusCode))
+	}
+	return nil
 }
 
 func installApp(client *taikungoclient.Client, args InstallAppArgs) (*mcp_golang.ToolResponse, error) {
@@ -118,12 +201,46 @@ func installApp(client *taikungoclient.Client, args InstallAppArgs) (*mcp_golang
 		createCmd.SetTimeout(args.Timeout)
 	}
 
-	if len(args.Parameters) > 0 {
-		var params []taikuncore.ProjectAppParamsDto
-		for _, param := range args.Parameters {
+	useCatalogDefaults := true
+	if args.UseCatalogDefaults != nil {
+		useCatalogDefaults = *args.UseCatalogDefaults
+	}
+
+	paramMap := map[string]string{}
+	if useCatalogDefaults {
+		defaults, response, err := client.Client.CatalogAppAPI.CatalogAppParamDetails(ctx, args.CatalogAppID).Execute()
+		if err != nil {
+			return createError(response, err), nil
+		}
+		if errorResp := checkResponse(response, "get catalog app default parameters"); errorResp != nil {
+			return errorResp, nil
+		}
+
+		for _, param := range defaults {
+			if key, ok := param.GetKeyOk(); ok && key != nil {
+				if value, ok := param.GetValueOk(); ok && value != nil {
+					paramMap[*key] = *value
+				}
+			}
+		}
+	}
+
+	for _, param := range args.Parameters {
+		paramMap[param.Key] = param.Value
+	}
+
+	if len(paramMap) > 0 {
+		keys := make([]string, 0, len(paramMap))
+		for key := range paramMap {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+
+		params := make([]taikuncore.ProjectAppParamsDto, 0, len(keys))
+		for _, key := range keys {
 			p := taikuncore.NewProjectAppParamsDto()
-			p.SetKey(param.Key)
-			p.SetValue(param.Value)
+			p.SetKey(key)
+			p.SetValue(paramMap[key])
 			params = append(params, *p)
 		}
 		createCmd.SetParameters(params)
@@ -167,18 +284,60 @@ func installApp(client *taikungoclient.Client, args InstallAppArgs) (*mcp_golang
 		logger.Printf("Waiting for application '%s' (ID: %d) to be ready...", args.Name, projectAppID)
 		waitTimeout := args.WaitTimeout
 		if waitTimeout == 0 {
-			waitTimeout = 600 // Default 10 minutes
+			waitTimeout = 60 // Default 60 seconds
 		}
 
-		err := waitForAppReady(client, projectAppID, waitTimeout)
+		err := waitForAppReady(client, projectAppID, waitTimeout, false, args.ReadyStabilizationSeconds)
 		if err != nil {
-			errorResp := ErrorResponse{
-				Error: fmt.Sprintf("Application '%s' installation initiated but failed during wait: %v", args.Name, err),
+			if args.RetrySyncOnFailure {
+				ctx := context.Background()
+				details, detailsResponse, detailsErr := client.Client.ProjectAppsAPI.ProjectappDetails(ctx, projectAppID).Execute()
+				if detailsErr == nil && details != nil && string(details.GetStatus()) == "Failed" {
+					logger.Printf("Application '%s' (ID: %d) failed, attempting one sync retry", args.Name, projectAppID)
+					syncErr := syncProjectApp(client, projectAppID, waitTimeout)
+					if syncErr == nil {
+						retryWaitErr := waitForAppReady(client, projectAppID, waitTimeout, false, args.ReadyStabilizationSeconds)
+						if retryWaitErr == nil {
+							resultMsg = fmt.Sprintf("Application '%s' (ID: %d) installed successfully after sync retry in namespace '%s'", args.Name, projectAppID, args.Namespace)
+							logger.Printf("Application '%s' (ID: %d) is now ready after sync retry", args.Name, projectAppID)
+						} else {
+							errorResp := ErrorResponse{
+								Error: fmt.Sprintf("Application '%s' failed initial wait, sync retry executed, but app is still not ready: %v", args.Name, retryWaitErr),
+							}
+							return createJSONResponse(errorResp), nil
+						}
+					} else {
+						errorResp := ErrorResponse{
+							Error: fmt.Sprintf("Application '%s' failed initial wait and sync retry failed: %v", args.Name, syncErr),
+						}
+						return createJSONResponse(errorResp), nil
+					}
+				} else {
+					if detailsErr != nil {
+						logger.Printf("Failed to inspect app details for retry decision (projectAppId %d): %v", projectAppID, detailsErr)
+						if detailsResponse != nil && (detailsResponse.StatusCode < 200 || detailsResponse.StatusCode >= 300) {
+							errorResp := ErrorResponse{
+								Error: fmt.Sprintf("Application '%s' installation failed during wait and details lookup failed: %v", args.Name, taikungoclient.CreateError(detailsResponse, detailsErr)),
+							}
+							return createJSONResponse(errorResp), nil
+						}
+					}
+					errorResp := ErrorResponse{
+						Error: fmt.Sprintf("Application '%s' installation initiated but failed during wait: %v", args.Name, err),
+					}
+					return createJSONResponse(errorResp), nil
+				}
+			} else {
+				errorResp := ErrorResponse{
+					Error: fmt.Sprintf("Application '%s' installation initiated but failed during wait: %v", args.Name, err),
+				}
+				return createJSONResponse(errorResp), nil
 			}
-			return createJSONResponse(errorResp), nil
 		}
-		resultMsg = fmt.Sprintf("Application '%s' (ID: %d) installed successfully and is ready in namespace '%s'", args.Name, projectAppID, args.Namespace)
-		logger.Printf("Application '%s' (ID: %d) is now ready", args.Name, projectAppID)
+		if resultMsg == "" {
+			resultMsg = fmt.Sprintf("Application '%s' (ID: %d) installed successfully and is ready in namespace '%s'", args.Name, projectAppID, args.Namespace)
+			logger.Printf("Application '%s' (ID: %d) is now ready", args.Name, projectAppID)
+		}
 	} else {
 		if response != nil && response.GetMessage() != "" {
 			resultMsg = fmt.Sprintf("Application '%s' installation initiated successfully. Message: %s", args.Name, response.GetMessage())
@@ -191,21 +350,40 @@ func installApp(client *taikungoclient.Client, args InstallAppArgs) (*mcp_golang
 	}
 
 	type InstallAppResponse struct {
-		Message      string `json:"message"`
-		Success      bool   `json:"success"`
-		ProjectAppID int32  `json:"projectAppId,omitempty"`
-		Name         string `json:"name"`
-		Namespace    string `json:"namespace"`
-		Status       string `json:"status"`
+		Message            string         `json:"message"`
+		Success            bool           `json:"success"`
+		ProjectAppID       int32          `json:"projectAppId,omitempty"`
+		Name               string         `json:"name"`
+		Namespace          string         `json:"namespace"`
+		Status             string         `json:"status"`
+		UseCatalogDefaults bool           `json:"useCatalogDefaults"`
+		ParametersApplied  []AppParameter `json:"parametersApplied,omitempty"`
+	}
+
+	var appliedParams []AppParameter
+	if len(paramMap) > 0 {
+		keys := make([]string, 0, len(paramMap))
+		for key := range paramMap {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			appliedParams = append(appliedParams, AppParameter{
+				Key:   key,
+				Value: paramMap[key],
+			})
+		}
 	}
 
 	responseData := InstallAppResponse{
-		Message:      resultMsg,
-		Success:      true,
-		ProjectAppID: projectAppID,
-		Name:         args.Name,
-		Namespace:    args.Namespace,
-		Status:       "initiated",
+		Message:            resultMsg,
+		Success:            true,
+		ProjectAppID:       projectAppID,
+		Name:               args.Name,
+		Namespace:          args.Namespace,
+		Status:             "initiated",
+		UseCatalogDefaults: useCatalogDefaults,
+		ParametersApplied:  appliedParams,
 	}
 
 	if args.WaitForReady {
@@ -231,13 +409,6 @@ func listApps(client *taikungoclient.Client, args ListAppsArgs) (*mcp_golang.Too
 	}
 
 	appList, httpResponse, err := req.Execute()
-	if err != nil {
-		return createError(httpResponse, err), nil
-	}
-
-	if errorResp := checkResponse(httpResponse, "list applications"); errorResp != nil {
-		return errorResp, nil
-	}
 
 	// Prepare response data
 	type AppSummary struct {
@@ -253,26 +424,65 @@ func listApps(client *taikungoclient.Client, args ListAppsArgs) (*mcp_golang.Too
 	}
 
 	var applications []AppSummary
-	if appList != nil && len(appList.Data) > 0 {
-		for _, app := range appList.Data {
-			appSummary := AppSummary{
-				ID:         app.GetId(),
-				Name:       app.GetName(),
-				Namespace:  app.GetNamespace(),
-				Status:     string(app.GetStatus()),
-				Version:    app.GetVersion(),
-				CatalogApp: app.GetCatalogAppName(),
-				AutoSync:   app.GetAutoSync(),
-			}
 
-			if app.GetCreated() != "" {
-				appSummary.Created = app.GetCreated()
-			}
-			if app.GetCreatedBy() != "" {
-				appSummary.CreatedBy = app.GetCreatedBy()
-			}
+	if err != nil {
+		if httpResponse == nil || httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
+			return createError(httpResponse, err), nil
+		}
 
-			applications = append(applications, appSummary)
+		// If unmarshaling failed, try to parse the raw body
+		if httpResponse != nil && httpResponse.Body != nil {
+			bodyBytes, readErr := readResponseBodyPreservingBody(httpResponse)
+			if readErr == nil {
+				body := string(bodyBytes)
+				// Use gjson to extract applications
+				data := gjson.Get(body, "data")
+				if data.IsArray() {
+					for _, app := range data.Array() {
+						applications = append(applications, AppSummary{
+							ID:         int32(app.Get("id").Int()),
+							Name:       app.Get("name").String(),
+							Namespace:  app.Get("namespace").String(),
+							Status:     app.Get("status").String(),
+							Version:    app.Get("version").String(),
+							CatalogApp: app.Get("catalogAppName").String(),
+							AutoSync:   app.Get("autoSync").Bool(),
+							Created:    app.Get("created").String(),
+							CreatedBy:  app.Get("createdBy").String(),
+						})
+					}
+				}
+			}
+		}
+		if len(applications) == 0 {
+			return createError(httpResponse, err), nil
+		}
+	} else {
+		if errorResp := checkResponse(httpResponse, "list applications"); errorResp != nil {
+			return errorResp, nil
+		}
+
+		if appList != nil && len(appList.Data) > 0 {
+			for _, app := range appList.Data {
+				appSummary := AppSummary{
+					ID:         app.GetId(),
+					Name:       app.GetName(),
+					Namespace:  app.GetNamespace(),
+					Status:     string(app.GetStatus()),
+					Version:    app.GetVersion(),
+					CatalogApp: app.GetCatalogAppName(),
+					AutoSync:   app.GetAutoSync(),
+				}
+
+				if app.GetCreated() != "" {
+					appSummary.Created = app.GetCreated()
+				}
+				if app.GetCreatedBy() != "" {
+					appSummary.CreatedBy = app.GetCreatedBy()
+				}
+
+				applications = append(applications, appSummary)
+			}
 		}
 	}
 
@@ -530,10 +740,42 @@ func uninstallApp(client *taikungoclient.Client, args UninstallAppArgs) (*mcp_go
 	} else {
 		resultMsg = fmt.Sprintf("Application ID %d uninstall initiated successfully", args.ProjectAppID)
 	}
-
 	successResp := SuccessResponse{
 		Message: resultMsg,
 		Success: true,
 	}
 	return createJSONResponse(successResp), nil
+}
+
+func waitForApp(client *taikungoclient.Client, args WaitForAppArgs) (*mcp_golang.ToolResponse, error) {
+	timeout := args.Timeout
+	if timeout == 0 {
+		timeout = 60 // Default 60s for creation
+		if args.WaitDeleted {
+			timeout = 30 // Default 30s for deletion
+		}
+	}
+
+	if args.WaitDeleted {
+		logger.Printf("Waiting for application ID %d to be deleted (timeout: %d seconds)", args.ProjectAppId, timeout)
+	} else {
+		logger.Printf("Waiting for application ID %d to be ready (timeout: %d seconds)", args.ProjectAppId, timeout)
+	}
+
+	err := waitForAppReady(client, args.ProjectAppId, timeout, args.WaitDeleted, args.ReadyStabilizationSeconds)
+	if err != nil {
+		return createJSONResponse(ErrorResponse{
+			Error: err.Error(),
+		}), nil
+	}
+
+	message := fmt.Sprintf("Application ID %d is now ready", args.ProjectAppId)
+	if args.WaitDeleted {
+		message = fmt.Sprintf("Application ID %d has been successfully deleted", args.ProjectAppId)
+	}
+
+	return createJSONResponse(SuccessResponse{
+		Message: message,
+		Success: true,
+	}), nil
 }

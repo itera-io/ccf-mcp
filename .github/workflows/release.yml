@@ -1,75 +1,74 @@
-# GitHub Actions workflow for GoReleaser
-# This workflow builds and releases binaries when a tag is pushed
+# GitHub Actions workflow for the rolling latest release
 
 name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
-  # Allow manual trigger for testing
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
   contents: write
-  packages: write
+
+concurrency:
+  group: latest-release
+  cancel-in-progress: true
 
 jobs:
-  goreleaser:
+  publish-latest:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Fetch full history for changelog generation
-      
+          fetch-depth: 0
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.25'
           cache: true
-      
+
       - name: Verify dependencies
         run: |
           go mod verify
           go mod download
-      
+
       - name: Run tests
-        run: |
-          go test -v ./...
-      
-      - name: Run GoReleaser
+        run: go test -v ./...
+
+      - name: Build release archives
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: '~> v2'
-          args: release --clean
+          args: release --snapshot --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Optional: Add additional tokens if needed for cross-repo operations
-          # HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
-  # Optional: Build and test on multiple platforms before release
-  test-platforms:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        go-version: ['1.24']
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Setup Go ${{ matrix.go-version }}
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ matrix.go-version }}
-          cache: true
-      
-      - name: Build
-        run: go build -v ./...
-      
-      - name: Test
-        run: go test -v ./...
+      - name: Remove previous rolling release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest --cleanup-tag -y || true
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/latest" || true
+
+      - name: Publish rolling latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > release-notes.md <<'EOF'
+          Automated rolling release from the latest `main` commit.
+
+          This release is recreated on each push to `main`, and older packaged releases are removed so only the latest build is kept.
+          EOF
+
+          gh release create latest \
+            dist/*.tar.gz \
+            dist/*.zip \
+            dist/checksums.txt \
+            --target "${GITHUB_SHA}" \
+            --title "Latest build" \
+            --notes-file release-notes.md

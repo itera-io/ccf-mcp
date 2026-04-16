@@ -1,27 +1,31 @@
-# Taikun MCP Server Development Guidelines
+# Cloudera Cloud Factory MCP Server Development Guidelines
 
 ## Project Overview
 
-This project provides an MCP (Model Context Protocol) server for Taikun Cloud Platform, enabling AI assistants to interact with Taikun's infrastructure management capabilities through structured tools.
+This project provides an MCP (Model Context Protocol) server for Cloudera Cloud Factory (formerly Taikun), enabling AI assistants to interact with the platform's infrastructure management capabilities through structured tools.
+
+**Agent hint:** Taikun has been renamed to Cloudera Cloud Factory. Prefer the new name in user-facing text, while keeping legacy identifiers (like `taikungoclient`, `TAIKUN_*`, and `taikun-mcp`) when required for compatibility.
+
+**Agent hint (VM vs Kubernetes node):** When the user asks for a **VM** or **server**, they usually mean a **standalone VM** (`create-standalone-vm`, related standalone VM tools, `commit-project` as needed)—not a Kubernetes cluster server role. When they ask for a **node** (or **worker node**, **cluster node**), they usually mean **adding or scaling capacity on the project’s Kubernetes cluster** (e.g. `add-server-to-project` with the appropriate role, then `commit-project`)—not a standalone VM. Confirm if the request is ambiguous.
 
 ## Resources
 
-### Official Taikun Resources
-- **Taikun API Documentation**: https://api.taikun.cloud/swagger/
-- **Taikun Showback API**: https://api.taikun.cloud/showback/swagger/
-- **Taikun Platform**: https://taikun.cloud/
+### Official Cloudera Cloud Factory (Taikun) Resources
+- **Cloudera Cloud Factory API Documentation**: https://api.taikun.cloud/swagger/
+- **Cloudera Cloud Factory Showback API**: https://api.taikun.cloud/showback/swagger/
+- **Cloudera Cloud Factory Documentation**: https://docs.taikun.cloud/
 
 ### Go Client Library
-- **Taikun Go Client**: https://github.com/itera-io/taikungoclient
+- **Taikun Go Client (legacy name)**: https://github.com/itera-io/taikungoclient
   - Auto-generated nightly from OpenAPI specs
   - Used by this project for all API interactions
   - Contains all API models and client methods
   - Example usage: `client.Client.CatalogAPI.CatalogList(ctx)`
 
 ### Terraform Provider (Reference Implementation)
-- **Terraform Provider Taikun**: https://github.com/itera-io/terraform-provider-taikun
+- **Terraform Provider Taikun (legacy name)**: https://github.com/itera-io/terraform-provider-taikun
   - Excellent reference for API usage patterns
-  - Shows how to handle Taikun API responses
+  - Shows how to handle Cloudera Cloud Factory API responses
   - Resource implementations demonstrate proper field handling
   - Error handling patterns to follow
 
@@ -34,9 +38,12 @@ This project provides an MCP (Model Context Protocol) server for Taikun Cloud Pl
 ### Development Tools
 - **Go Documentation**: Use `go doc github.com/itera-io/taikungoclient/client` to explore API types
 - **API Inspection**: Create temporary Go files to inspect struct fields when needed
-- **Taikun CLI**: May provide additional usage examples
+- **Taikun CLI (legacy name)**: May provide additional usage examples
 
 ### Common API Patterns to Reference
+
+#### Boolean Parameters
+- **ALWAYS call boolean setters unconditionally**: Throughout the codebase, boolean setters (e.g., `SetForceDeleteVClusters(args.ForceDeleteVClusters)`) must be called with their actual value (true or false) rather than being wrapped in an `if` block. This ensures the API receives the user-provided value rather than falling back to an internal default.
 
 #### Catalog Operations
 - **Adding Apps**: See `terraform-provider-taikun/taikun/catalog/resource_taikun_catalog.go`
@@ -48,8 +55,10 @@ This project provides an MCP (Model Context Protocol) server for Taikun Cloud Pl
 - **Project Apps**: Application deployment patterns in Terraform provider
 
 #### Authentication
-- **Client Creation**: `taikungoclient.NewClientFromCredentials(username, password, "", "", "", apiHost)`
-- **Environment Variables**: `TAIKUN_EMAIL`, `TAIKUN_PASSWORD`, `TAIKUN_API_HOST`
+- **Client Creation**: `taikungoclient.NewClientFromAccessKey(domainName, accessKey, secretKey, apiHost)`
+- **Environment Variables (legacy names)**: `TAIKUN_ACCESS_KEY`, `TAIKUN_SECRET_KEY`, `TAIKUN_API_HOST`, `TAIKUN_DOMAIN_NAME`
+- **Robot User Scopes**: Prefer checking the `robot-user-capabilities` tool when you need to understand which MCP actions the current Robot User can perform.
+- **Agent Scope Check**: At the beginning of any task that will call Cloudera Cloud Factory, check `robot-user-capabilities` first to confirm the current Robot User has the needed scopes. If the required access is missing, tell the user early instead of starting work that cannot succeed.
 
 ### Troubleshooting Resources
 
@@ -64,7 +73,18 @@ When unsure about API response fields:
 - **Nullable Fields**: Always check `.IsSet()` and `.Get() != nil` for `NullableString` types
 - **Pointer Fields**: Check for `!= nil` before dereferencing
 - **Pagination**: Most list APIs support `limit`, `offset`, and `search` parameters
-- **Error Handling**: **ALWAYS use `createError()` for ALL Taikun API errors** - provides clear, detailed error messages from the API. Use `ErrorResponse` only for custom validation errors
+- **Error Handling**: **ALWAYS use `createError()` for ALL Cloudera Cloud Factory API errors** - provides clear, detailed error messages from the API. Use `ErrorResponse` only for custom validation errors
+- **Kubeconfig TTL**: When creating kubeconfigs, use short expirations (around 60 minutes) unless the user explicitly requests longer.
+- **Kubeconfig Storage**: Prefer saving kubeconfigs in temporary directories (e.g., `/tmp`) unless the user requests a specific path.
+- **Cloud Credential Types**: Treat AWS/GCP/Azure as public clouds; OpenStack/Proxmox/Zadara/vSphere as private clouds; OpenShift/Generic K8s as Kubernetes clusters.
+- **GCP Flavors**: Avoid machine types that support only hyperdisk attachments; they will fail to deploy.
+- **AWS LoadBalancer**: When creating LoadBalancer Services on AWS, set `service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: instance` to avoid ENI resolution issues with pod IP targets.
+- **Image Binding**: Binding images to a project is for standalone VM workflows. Kubernetes project deployment does not require `bind-images-to-project`, so do not treat image binding as a prerequisite for `commit-project` on Kubernetes clusters.
+- **Project Changes**: If you add servers to an already deployed project, you must run `commit-project` again to apply the changes.
+- **Standalone VMs**: Projects can host both Kubernetes resources and standalone VMs. After `create-standalone-vm` (or other standalone VM mutations such as disk or flavor changes), run `commit-project` for that project so changes are provisioned, unless your organization auto-commits. The MCP `commit-project` tool falls back to the VM-specific commit endpoint when the cluster-style commit path is not applicable.
+- **Project Status `Updating`**: Treat `Updating` as an ongoing commit or repair operation. Do not call `commit-project` again while a project is `Updating`; wait for it to settle into a terminal or steady state first.
+- **Sizing**: Minimal clusters (2 CPU / 2 GB RAM for bastion, master, and worker) should only be used for deployment tests and basic `kubectl` operations. For minimal workload clusters, use 2 CPU / 2 GB for bastion, 4 CPU / 4 GB for master, and 4 CPU / 8 GB for worker. Add workers or enable autoscaling based on workload.
+- **Virtual Clusters**: Agents can create virtual clusters within projects to isolate workloads while saving resources; ideal for testing and fast iteration.
 
 ## Project Structure
 
@@ -135,8 +155,8 @@ return mcp_golang.NewToolResponse(
 ```
 
 #### Error Handling
-- **ALWAYS use `createError()` for ALL Taikun API errors** - this uses `taikungoclient.CreateError()` internally
-- The `createError()` function provides clear, detailed error messages from the Taikun API
+- **ALWAYS use `createError()` for ALL Cloudera Cloud Factory API errors** - this uses `taikungoclient.CreateError()` internally
+- The `createError()` function provides clear, detailed error messages from the Cloudera Cloud Factory API
 - For custom validation errors (non-API), use `ErrorResponse` struct:
 ```go
 // ✅ CORRECT - For API errors
@@ -152,7 +172,7 @@ return createJSONResponse(errorResp), nil
 ```
 
 **Why use `createError()`?**
-- Provides detailed Taikun API error messages
+- Provides detailed Cloudera Cloud Factory API error messages
 - Handles HTTP response codes properly
 - Extracts meaningful error details from API responses
 - Maintains consistent error formatting across all tools
@@ -178,9 +198,9 @@ func createError(response *http.Response, err error) *mcp_golang.ToolResponse {
 
 **Example of Clear Error Messages:**
 - **Without `createError()`**: `"HTTP error 404"` (unclear)
-- **With `createError()`**: `"Taikun Error: wordpress not found (HTTP 404)"` (clear and actionable)
+- **With `createError()`**: `"Cloudera Cloud Factory Error: wordpress not found (HTTP 404)"` (clear and actionable)
 
-This is why we **ALWAYS** use `createError()` for Taikun API errors!
+This is why we **ALWAYS** use `createError()` for Cloudera Cloud Factory API errors!
 
 ### Code Organization
 
@@ -219,7 +239,7 @@ When adding new tools, update `basic_test.go`:
 ### API Client Usage
 
 #### Nullable Fields
-Handle Taikun API nullable fields properly:
+Handle Cloudera Cloud Factory API nullable fields properly:
 ```go
 // For NullableString
 if field.IsSet() && field.Get() != nil {
@@ -287,7 +307,7 @@ type ToolArgs struct {
 
 Before submitting any new tool:
 - [ ] All responses use `createJSONResponse()`
-- [ ] **ALL Taikun API errors use `createError()` helper** (provides clear error messages)
+- [ ] **ALL Cloudera Cloud Factory API errors use `createError()` helper** (provides clear error messages)
 - [ ] Custom validation errors use `ErrorResponse` struct
 - [ ] Struct types defined with proper JSON tags
 - [ ] Added to `basic_test.go`

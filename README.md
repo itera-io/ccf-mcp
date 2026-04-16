@@ -1,149 +1,197 @@
-# Taikun MCP Server
+# Cloudera Cloud Factory MCP Server
 
-A Model Context Protocol (MCP) server that provides tools for managing Taikun Cloud resources including projects, virtual clusters, catalogs, and applications.
+A Model Context Protocol (MCP) server for managing Cloudera Cloud Factory resources from MCP-capable clients such as Claude Desktop and Cursor.
 
-[![Release](https://img.shields.io/github/v/release/itera-io/taikun-mcp)](https://github.com/itera-io/taikun-mcp/releases)
-[![CI](https://github.com/itera-io/taikun-mcp/workflows/CI/badge.svg)](https://github.com/itera-io/taikun-mcp/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/itera-io/taikun-mcp)](https://goreportcard.com/report/github.com/itera-io/taikun-mcp)
+It supports project lifecycle operations, Kubernetes resources, application catalogs and installs, standalone VMs, cloud credentials, identity administration, backups, autoscaling, and related platform workflows.
+
+[![CI](https://github.com/skotnicky/cloudera-cloud-factory-mcp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/skotnicky/cloudera-cloud-factory-mcp/actions/workflows/ci.yml)
+[![Release Workflow](https://github.com/skotnicky/cloudera-cloud-factory-mcp/actions/workflows/release.yml/badge.svg)](https://github.com/skotnicky/cloudera-cloud-factory-mcp/actions/workflows/release.yml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/skotnicky/cloudera-cloud-factory-mcp)](https://github.com/skotnicky/cloudera-cloud-factory-mcp/blob/main/go.mod)
+[![Go Report Card](https://goreportcard.com/badge/github.com/skotnicky/cloudera-cloud-factory-mcp)](https://goreportcard.com/report/github.com/skotnicky/cloudera-cloud-factory-mcp)
+
+## Highlights
+
+- Robot User authentication with scope-aware authorization
+- Structured JSON responses for all tools
+- Project and virtual cluster management
+- Kubernetes deployment, patch, delete, and kubeconfig workflows
+- Catalog, repository, and application lifecycle management
+- Standalone VM, disk, IP, and profile management
+- Cloud credential, image, flavor, and server management
+- Identity, access profile, alerting, backup, autoscaling, and policy tooling
 
 ## Installation
 
-### Option 1: Download Pre-built Binaries (Recommended)
+### Option 1: Download pre-built binaries
 
-Download the latest release for your platform from the [releases page](https://github.com/itera-io/taikun-mcp/releases).
+Download the latest release from the [releases page](https://github.com/skotnicky/cloudera-cloud-factory-mcp/releases).
+
+The `latest` release is published automatically from the `main` branch and replaced on each new push, so only the newest packaged build is kept.
 
 #### Linux (x86_64)
 ```bash
-curl -L https://github.com/itera-io/taikun-mcp/releases/latest/download/taikun-mcp_Linux_x86_64.tar.gz | tar xz
-sudo mv taikun-mcp /usr/local/bin/
+curl -L https://github.com/skotnicky/cloudera-cloud-factory-mcp/releases/latest/download/cloudera-cloud-factory-mcp_Linux_x86_64.tar.gz | tar xz
+sudo mv cloudera-cloud-factory-mcp /usr/local/bin/
 ```
 
 #### macOS (Intel)
 ```bash
-curl -L https://github.com/itera-io/taikun-mcp/releases/latest/download/taikun-mcp_Darwin_x86_64.tar.gz | tar xz
-sudo mv taikun-mcp /usr/local/bin/
+curl -L https://github.com/skotnicky/cloudera-cloud-factory-mcp/releases/latest/download/cloudera-cloud-factory-mcp_Darwin_x86_64.tar.gz | tar xz
+sudo mv cloudera-cloud-factory-mcp /usr/local/bin/
 ```
 
 #### macOS (Apple Silicon)
 ```bash
-curl -L https://github.com/itera-io/taikun-mcp/releases/latest/download/taikun-mcp_Darwin_arm64.tar.gz | tar xz
-sudo mv taikun-mcp /usr/local/bin/
+curl -L https://github.com/skotnicky/cloudera-cloud-factory-mcp/releases/latest/download/cloudera-cloud-factory-mcp_Darwin_arm64.tar.gz | tar xz
+sudo mv cloudera-cloud-factory-mcp /usr/local/bin/
 ```
 
 #### Windows (PowerShell)
 ```powershell
-Invoke-WebRequest -Uri "https://github.com/itera-io/taikun-mcp/releases/latest/download/taikun-mcp_Windows_x86_64.zip" -OutFile "taikun-mcp.zip"
-Expand-Archive -Path "taikun-mcp.zip" -DestinationPath .
-# Move taikun-mcp.exe to your PATH
+Invoke-WebRequest -Uri "https://github.com/skotnicky/cloudera-cloud-factory-mcp/releases/latest/download/cloudera-cloud-factory-mcp_Windows_x86_64.zip" -OutFile "cloudera-cloud-factory-mcp.zip"
+Expand-Archive -Path "cloudera-cloud-factory-mcp.zip" -DestinationPath .
+# Move cloudera-cloud-factory-mcp.exe to a directory on your PATH
 ```
 
-### Option 2: Build from Source
+### Option 2: Build from source
 
 #### Prerequisites
-- Go 1.24 or later
-- Taikun Cloud account with API access
+
+- Go 1.25 or later
+- Cloudera Cloud Factory Robot User credentials
 
 ```bash
-git clone https://github.com/itera-io/taikun-mcp
-cd taikun-mcp
-go build -o taikun-mcp
+git clone https://github.com/skotnicky/cloudera-cloud-factory-mcp
+cd cloudera-cloud-factory-mcp
+go build -o cloudera-cloud-factory-mcp .
 ```
 
-### Option 3: Using Go Install
+### Option 3: Install with Go
 
 ```bash
-go install github.com/itera-io/taikun-mcp@latest
+go install github.com/skotnicky/cloudera-cloud-factory-mcp@latest
 ```
 
 ## Configuration
 
-The server supports multiple authentication methods with Taikun API. Choose one of the following options:
-
-### Option 1: Access Key/Secret Key Authentication (Recommended)
+The server authenticates with **Robot User** credentials only. Use the legacy `TAIKUN_*` environment variable names expected by the upstream Go client.
 
 ```bash
-export TAIKUN_ACCESS_KEY="your-access-key"
-export TAIKUN_SECRET_KEY="your-secret-key"
-export TAIKUN_AUTH_MODE="token"  # Optional, defaults to "token"
-export TAIKUN_API_HOST="api.taikun.cloud"  # Optional, defaults to api.taikun.cloud
+export TAIKUN_ACCESS_KEY="your-robot-user-access-key"
+export TAIKUN_SECRET_KEY="your-robot-user-secret-key"
+export TAIKUN_API_HOST="api-latest.osc1.sjc.cloudera.com"  # Optional
+export TAIKUN_DOMAIN_NAME=""                               # Optional
 ```
 
-### Option 2: Email/Password Authentication
+### Important authentication notes
+
+- Email/password authentication is no longer supported by this server.
+- If `TAIKUN_AUTH_MODE` is set, it is ignored.
+- If `TAIKUN_API_HOST` is not set, the server defaults to `api-latest.osc1.sjc.cloudera.com`.
+
+### Using a `.env` file
+
+The binary does not automatically load `.env` files on startup. You can either export the variables in your shell or use the included helper target:
 
 ```bash
-export TAIKUN_EMAIL="your-email@example.com"
-export TAIKUN_PASSWORD="your-password"
-export TAIKUN_API_HOST="api.taikun.cloud"  # Optional, defaults to api.taikun.cloud
+cp .env.example .env
+make run-env
 ```
 
+Equivalent manual shell usage:
 
-### Environment File
-
-You can also create a `.env` file with your preferred authentication method:
-
-**For Access Key/Secret Key:**
 ```bash
-TAIKUN_ACCESS_KEY=your-access-key
-TAIKUN_SECRET_KEY=your-secret-key
-TAIKUN_AUTH_MODE=token
-TAIKUN_API_HOST=api.taikun.cloud
-```
-
-**For Email/Password:**
-```bash
-TAIKUN_EMAIL=your-email@example.com
-TAIKUN_PASSWORD=your-password
-TAIKUN_API_HOST=api.taikun.cloud
+set -a
+source .env
+set +a
+./cloudera-cloud-factory-mcp
 ```
 
 ## Usage
 
-### Starting the Server
+### Start the server
 
 ```bash
-./taikun-mcp
+./cloudera-cloud-factory-mcp
 ```
 
-The server will start and listen for MCP requests via stdio transport.
+The server communicates over MCP stdio transport.
 
-### Connecting from Claude Desktop
+### Print version information
 
-Add this configuration to your Claude Desktop config using your preferred authentication method:
+```bash
+./cloudera-cloud-factory-mcp --version
+```
 
-**For Access Key/Secret Key Authentication:**
+### Logs
+
+Runtime logs are written to:
+
+```text
+/tmp/cloudera_cloud_factory_mcp_server.log
+```
+
+## MCP client configuration
+
+### Claude Desktop
+
 ```json
 {
   "mcpServers": {
-    "taikun": {
-      "command": "/path/to/taikun-mcp",
+    "cloudera-cloud-factory": {
+      "command": "/path/to/cloudera-cloud-factory-mcp",
       "env": {
-        "TAIKUN_ACCESS_KEY": "your-access-key",
-        "TAIKUN_SECRET_KEY": "your-secret-key",
-        "TAIKUN_AUTH_MODE": "token"
+        "TAIKUN_ACCESS_KEY": "your-robot-user-access-key",
+        "TAIKUN_SECRET_KEY": "your-robot-user-secret-key",
+        "TAIKUN_API_HOST": "api-latest.osc1.sjc.cloudera.com"
       }
     }
   }
 }
 ```
 
-**For Email/Password Authentication:**
-```json
-{
-  "mcpServers": {
-    "taikun": {
-      "command": "/path/to/taikun-mcp",
-      "env": {
-        "TAIKUN_EMAIL": "your-email@example.com",
-        "TAIKUN_PASSWORD": "your-password"
-      }
-    }
-  }
-}
+Any MCP client that can launch a stdio server can use the same binary and environment variables.
+
+## Tool coverage
+
+The server currently exposes tooling across these areas:
+
+- Project management: create, list, inspect, commit, wait, and delete projects
+- Virtual clusters: create, list, and delete virtual clusters
+- Kubernetes: deploy YAML, patch resources, list resources, create or fetch kubeconfigs
+- Cluster nodes and servers: add servers to projects, list them, and remove them
+- Standalone VMs: create, inspect, manage IPs, operate power state, manage disks, and retrieve console/RDP/password metadata
+- Standalone VM profiles: create, update, lock, and manage profile security group rules
+- Applications and catalogs: repositories, catalog apps, installs, sync, uninstall, and wait flows
+- Images and flavors: list, inspect, and bind images or flavors to projects
+- Cloud credentials: list plus create or update provider-specific credentials
+- Identity and access: domains, organizations, users, identity groups, and access profiles
+- Platform services: alerting, backups, monitoring, AI assistant, policy, and spot settings
+- Autoscaling: enable, inspect, update, and disable autoscaling
+
+## Behavior notes
+
+- `robot-user-capabilities` shows the current Robot User identity, scopes, and tool access.
+- Scope-aware tools fail fast with a structured JSON error when the Robot User lacks required access.
+- All tool responses are JSON, not free-form text.
+- After adding Kubernetes servers or making standalone VM changes, call `commit-project` to provision them.
+- Standalone VM workflows may require binding images and flavors to the project first.
+- In general, user requests for a "VM" or "server" map to standalone VM workflows, while "node" usually means adding capacity to a Kubernetes cluster.
+
+## Development
+
+Common local commands:
+
+```bash
+go test -v ./...
+go build -o cloudera-cloud-factory-mcp .
+make test
+make test-all
+make lint
 ```
 
 ## Support
 
-For issues and questions:
 - Create an issue in this repository
-- Check the [Taikun documentation](https://docs.taikun.cloud/)
+- Check the [Cloudera Cloud Factory documentation](https://docs.taikun.cloud/)
 - Review the [MCP specification](https://modelcontextprotocol.io/)

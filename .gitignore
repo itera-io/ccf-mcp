@@ -37,7 +37,7 @@ ehthumbs.db
 Thumbs.db
 
 # Project specific
-taikun-mcp
+cloudera-cloud-factory-mcp
 build/
 *.log
 
@@ -59,3 +59,5 @@ coverage.out
 # Debug files
 debug
 *.pprof
+*.kubeconfig
+*kubeconfig*

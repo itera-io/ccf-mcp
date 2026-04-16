@@ -1,7 +1,7 @@
-# Taikun MCP Server Makefile
+# Cloudera Cloud Factory MCP Server Makefile
 
 # Variables
-BINARY_NAME=taikun-mcp
+BINARY_NAME=cloudera-cloud-factory-mcp
 BUILD_DIR=build
 SCRIPTS_DIR=scripts
 
@@ -57,7 +57,7 @@ test-all:
 .PHONY: test-integration
 test-integration:
 	@echo "Running integration tests..."
-	@echo "Make sure TAIKUN_EMAIL and TAIKUN_PASSWORD are set"
+	@echo "Make sure TAIKUN_ACCESS_KEY and TAIKUN_SECRET_KEY are set"
 	$(GOTEST) -v -tags=integration -run TestIntegration ./...
 
 # Run tests with coverage

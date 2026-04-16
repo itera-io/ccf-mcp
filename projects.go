@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"time"
 
 	"github.com/itera-io/taikungoclient"
 	taikuncore "github.com/itera-io/taikungoclient/client"
@@ -17,65 +19,101 @@ type ListProjectsArgs struct {
 	VirtualClustersOnly bool   `json:"virtualClustersOnly,omitempty" jsonschema:"description=Return only virtual cluster projects (default: false)"`
 }
 
+func emptyProjectListResponse(message string) *mcp_golang.ToolResponse {
+	return createJSONResponse(ProjectListResponse{
+		Projects: []ProjectSummary{},
+		Total:    0,
+		Message:  message,
+	})
+}
+
+func listProjectsErrorResponse(httpResponse *http.Response, err error) *mcp_golang.ToolResponse {
+	apiErr := apiErrorInfoFromResponse(httpResponse, err)
+	if apiErr.isNotFound() {
+		return emptyProjectListResponse("No projects found")
+	}
+	return apiErr.toolResponse()
+}
+
+func waitForProjectLookupErrorResponse(waitDeleted bool, projectID int32, httpResponse *http.Response, err error) *mcp_golang.ToolResponse {
+	apiErr := apiErrorInfoFromResponse(httpResponse, err)
+	if waitDeleted && apiErr.isNotFound() {
+		return createJSONResponse(SuccessResponse{
+			Message: fmt.Sprintf("Project %d has been successfully deleted", projectID),
+			Success: true,
+		})
+	}
+	return apiErr.toolResponse()
+}
+
+func deleteProjectErrorResponse(projectID int32, httpResponse *http.Response, err error) *mcp_golang.ToolResponse {
+	apiErr := apiErrorInfoFromResponse(httpResponse, err)
+	if apiErr.contains("You can not delete non empty project") {
+		return createJSONResponse(ErrorResponse{
+			Error:   fmt.Sprintf("Project %d cannot be deleted until all servers are removed", projectID),
+			Details: apiErr.Message,
+		})
+	}
+	return apiErr.toolResponse()
+}
+
 func listProjects(client *taikungoclient.Client, args ListProjectsArgs) (*mcp_golang.ToolResponse, error) {
 	ctx := context.Background()
 
-	req := client.Client.ProjectsAPI.ProjectsList(ctx)
-
-	if args.Limit > 0 {
-		req = req.Limit(args.Limit)
-	}
-	if args.Offset > 0 {
-		req = req.Offset(args.Offset)
-	}
-	if args.Search != "" {
-		req = req.Search(args.Search)
-	}
-	if args.HealthyOnly {
-		req = req.Healthy(true)
-	}
-
-	projectList, httpResponse, err := req.Execute()
-	if err != nil {
-		return createError(httpResponse, err), nil
-	}
-
-	if errorResp := checkResponse(httpResponse, "list projects"); errorResp != nil {
-		return errorResp, nil
-	}
-
-	if projectList == nil || len(projectList.Data) == 0 {
-		listResp := ProjectListResponse{
-			Projects: []ProjectSummary{},
-			Total:    0,
-			Message:  "No projects found",
-		}
-		return createJSONResponse(listResp), nil
-	}
+	const pageSize int32 = 100
 
 	var filteredProjects []taikuncore.ProjectListDetailDto
+	for pageOffset := int32(0); ; pageOffset += pageSize {
+		req := client.Client.ProjectsAPI.ProjectsList(ctx).
+			Limit(pageSize).
+			Offset(pageOffset)
 
-	for _, project := range projectList.Data {
-		include := true
-
-		// Always filter to Kubernetes projects only
-		if !project.GetIsKubernetes() {
-			include = false
+		if args.Search != "" {
+			req = req.Search(args.Search)
+		}
+		if args.HealthyOnly {
+			req = req.Healthy(true)
 		}
 
-		// Filter by virtual clusters if requested
-		if args.VirtualClustersOnly && !project.GetIsVirtualCluster() {
-			include = false
+		projectList, httpResponse, err := req.Execute()
+		if err != nil {
+			return listProjectsErrorResponse(httpResponse, err), nil
 		}
 
-		if include {
-			filteredProjects = append(filteredProjects, project)
+		if errorResp := checkResponse(httpResponse, "list projects"); errorResp != nil {
+			return errorResp, nil
+		}
+
+		if projectList == nil || len(projectList.Data) == 0 {
+			break
+		}
+
+		for _, project := range projectList.Data {
+			include := true
+
+			if args.VirtualClustersOnly && !project.GetIsVirtualCluster() {
+				include = false
+			}
+
+			if include {
+				filteredProjects = append(filteredProjects, project)
+			}
+		}
+
+		if int32(len(projectList.Data)) < pageSize || pageOffset+pageSize >= projectList.GetTotalCount() {
+			break
 		}
 	}
 
-	// Prepare the response data
+	if len(filteredProjects) == 0 {
+		return emptyProjectListResponse("No projects found matching the specified criteria"), nil
+	}
+
+	pagedProjects := applyOffsetLimit(filteredProjects, args.Offset, args.Limit)
+
+	// Prepare the response data.
 	var projects []ProjectSummary
-	for _, project := range filteredProjects {
+	for _, project := range pagedProjects {
 		projectSummary := ProjectSummary{
 			ID:                     project.GetId(),
 			Name:                   project.GetName(),
@@ -112,19 +150,19 @@ func listProjects(client *taikungoclient.Client, args ListProjectsArgs) (*mcp_go
 	var message string
 	if args.VirtualClustersOnly {
 		filterType = "virtual-clusters"
-		message = fmt.Sprintf("Found %d virtual cluster projects", len(projects))
+		message = fmt.Sprintf("Found %d virtual cluster projects", len(filteredProjects))
 	} else {
-		filterType = "kubernetes"
-		message = fmt.Sprintf("Found %d Kubernetes projects", len(projects))
+		filterType = "all"
+		message = fmt.Sprintf("Found %d projects", len(filteredProjects))
 	}
 
 	if len(projects) == 0 {
-		message = "No projects found matching the specified criteria"
+		message = fmt.Sprintf("No projects found on the requested page (total matches: %d)", len(filteredProjects))
 	}
 
 	response := ProjectListResponse{
 		Projects:   projects,
-		Total:      len(projects),
+		Total:      len(filteredProjects),
 		FilterType: filterType,
 		Message:    message,
 	}
@@ -133,10 +171,10 @@ func listProjects(client *taikungoclient.Client, args ListProjectsArgs) (*mcp_go
 }
 
 func getProjectType(project taikuncore.ProjectListDetailDto) string {
-	if project.GetIsKubernetes() {
-		return "Kubernetes"
+	if project.GetIsVirtualCluster() {
+		return "VirtualCluster"
 	}
-	return "Standalone"
+	return "Project"
 }
 
 func isProjectReadyForVirtualCluster(project taikuncore.ProjectListDetailDto) bool {
@@ -173,24 +211,18 @@ func createProject(client *taikungoclient.Client, args CreateProjectArgs) (*mcp_
 	createCmd := taikuncore.NewCreateProjectCommand()
 	createCmd.SetName(args.Name)
 	createCmd.SetCloudCredentialId(args.CloudCredentialID)
-	createCmd.SetIsKubernetes(true) // Always create Kubernetes projects
+	createCmd.SetIsKubernetes(true)
 
-	// Set optional parameters
 	if args.KubernetesProfileID != 0 {
 		createCmd.SetKubernetesProfileId(args.KubernetesProfileID)
+	}
+	if args.KubernetesVersion != "" {
+		createCmd.SetKubernetesVersion(args.KubernetesVersion)
 	}
 	if args.AlertingProfileID != 0 {
 		createCmd.SetAlertingProfileId(args.AlertingProfileID)
 	}
-	// Note: BackupCredentialID might not be available in this API
-	// if args.BackupCredentialID != 0 {
-	//     createCmd.SetBackupCredentialId(args.BackupCredentialID)
-	// }
-	if args.KubernetesVersion != "" {
-		createCmd.SetKubernetesVersion(args.KubernetesVersion)
-	}
-	
-	// Set monitoring
+
 	createCmd.SetIsMonitoringEnabled(args.Monitoring)
 
 	// Execute the API call
@@ -248,7 +280,7 @@ func deleteProject(client *taikungoclient.Client, args DeleteProjectArgs) (*mcp_
 		Execute()
 
 	if err != nil {
-		return createError(httpResponse, err), nil
+		return deleteProjectErrorResponse(args.ProjectID, httpResponse, err), nil
 	}
 
 	if errorResp := checkResponse(httpResponse, "delete project"); errorResp != nil {
@@ -262,4 +294,84 @@ func deleteProject(client *taikungoclient.Client, args DeleteProjectArgs) (*mcp_
 	}
 
 	return createJSONResponse(successResp), nil
+}
+
+func waitForProject(client *taikungoclient.Client, args WaitForProjectArgs) (*mcp_golang.ToolResponse, error) {
+	ctx := context.Background()
+	timeout := 600 // Default 10 minutes for creation
+	if args.WaitDeleted {
+		timeout = 300 // Default 5 minutes for deletion
+	}
+	if args.Timeout > 0 {
+		timeout = int(args.Timeout)
+	}
+
+	if args.WaitDeleted {
+		logger.Printf("Waiting for project %d to be deleted (timeout: %d seconds)", args.ProjectId, timeout)
+	} else {
+		logger.Printf("Waiting for project %d to be ready (timeout: %d seconds)", args.ProjectId, timeout)
+	}
+
+	// Poll every 30 seconds
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	timeoutChan := time.After(time.Duration(timeout) * time.Second)
+
+	for {
+		select {
+		case <-timeoutChan:
+			return createJSONResponse(ErrorResponse{
+				Error: fmt.Sprintf("Timeout waiting for project %d after %d seconds", args.ProjectId, timeout),
+			}), nil
+		case <-ticker.C:
+			// Check project status
+			request := client.Client.ProjectsAPI.ProjectsList(ctx).Id(args.ProjectId)
+			result, httpResponse, err := request.Execute()
+			if err != nil {
+				return waitForProjectLookupErrorResponse(args.WaitDeleted, args.ProjectId, httpResponse, err), nil
+			}
+
+			if errorResp := checkResponse(httpResponse, "check project status"); errorResp != nil {
+				return errorResp, nil
+			}
+
+			if len(result.Data) == 0 {
+				if args.WaitDeleted {
+					return createJSONResponse(SuccessResponse{
+						Message: fmt.Sprintf("Project %d has been successfully deleted", args.ProjectId),
+						Success: true,
+					}), nil
+				}
+				return createJSONResponse(ErrorResponse{
+					Error: fmt.Sprintf("Project %d not found", args.ProjectId),
+				}), nil
+			}
+
+			if args.WaitDeleted {
+				project := result.Data[0]
+				logger.Printf("Project %d still exists - Status: %s", args.ProjectId, project.GetStatus())
+				continue
+			}
+
+			project := result.Data[0]
+			status := project.GetStatus()
+			health := project.GetHealth()
+
+			logger.Printf("Project %d status: %s, health: %s", args.ProjectId, status, health)
+
+			if status == taikuncore.PROJECTSTATUS_READY && health == taikuncore.PROJECTHEALTH_HEALTHY {
+				return createJSONResponse(SuccessResponse{
+					Message: fmt.Sprintf("Project %d is now ready and healthy", args.ProjectId),
+					Success: true,
+				}), nil
+			}
+
+			if status == taikuncore.PROJECTSTATUS_FAILURE || health == taikuncore.PROJECTHEALTH_UNHEALTHY {
+				return createJSONResponse(ErrorResponse{
+					Error: fmt.Sprintf("Project %d reached a failure state - Status: %s, Health: %s", args.ProjectId, status, health),
+				}), nil
+			}
+		}
+	}
 }

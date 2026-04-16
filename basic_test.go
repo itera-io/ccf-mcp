@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"os"
 	"testing"
+
+	taikuncore "github.com/itera-io/taikungoclient/client"
 )
 
 func TestMain(m *testing.M) {
@@ -26,7 +29,7 @@ func TestResponseStructMarshaling(t *testing.T) {
 			},
 		},
 		{
-			name: "ErrorResponse", 
+			name: "ErrorResponse",
 			data: ErrorResponse{
 				Error: "Test error",
 			},
@@ -96,11 +99,60 @@ func TestCreateJSONResponseHelper(t *testing.T) {
 	}
 
 	if result.Message != "Test message" || !result.Success {
-		t.Errorf("Expected message='Test message' success=true, got message='%s' success=%t", 
+		t.Errorf("Expected message='Test message' success=true, got message='%s' success=%t",
 			result.Message, result.Success)
 	}
 
 	t.Logf("✅ JSON Response: %s", content.TextContent.Text)
+}
+
+func TestResolveOrganizationIDForCatalogExplicitWins(t *testing.T) {
+	previous := getRobotUserContext()
+	setRobotUserContext(RobotUserContext{OrganizationID: 2090})
+	defer setRobotUserContext(previous)
+
+	orgID, errorResp := resolveOrganizationIDForCatalog(nil, context.Background(), 321)
+	if errorResp != nil {
+		t.Fatalf("expected no error response, got %#v", errorResp)
+	}
+	if orgID != 321 {
+		t.Fatalf("expected explicit organizationId 321, got %d", orgID)
+	}
+}
+
+func TestResolveOrganizationIDForCatalogPrefersRobotUserContext(t *testing.T) {
+	previous := getRobotUserContext()
+	setRobotUserContext(RobotUserContext{OrganizationID: 2090})
+	defer setRobotUserContext(previous)
+
+	orgID, errorResp := resolveOrganizationIDForCatalog(nil, context.Background(), 0)
+	if errorResp != nil {
+		t.Fatalf("expected no error response, got %#v", errorResp)
+	}
+	if orgID != 2090 {
+		t.Fatalf("expected robot user organizationId 2090, got %d", orgID)
+	}
+}
+
+func TestBuildCreateCatalogAppCommandAlwaysSendsParametersArray(t *testing.T) {
+	cmd := buildCreateCatalogAppCommand(360, "anywhere-cloud", "anywhere-cloud", "", nil)
+	payload, err := cmd.ToMap()
+	if err != nil {
+		t.Fatalf("expected no error building payload map, got %v", err)
+	}
+
+	parameters, ok := payload["parameters"]
+	if !ok {
+		t.Fatal("expected parameters key to be present")
+	}
+
+	paramsSlice, ok := parameters.([]taikuncore.CatalogAppParamsDto)
+	if !ok {
+		t.Fatalf("expected parameters to be []CatalogAppParamsDto, got %T", parameters)
+	}
+	if len(paramsSlice) != 0 {
+		t.Fatalf("expected empty parameters slice, got len=%d", len(paramsSlice))
+	}
 }
 
 func TestArgumentStructs(t *testing.T) {
@@ -110,12 +162,20 @@ func TestArgumentStructs(t *testing.T) {
 		data interface{}
 	}{
 		{
+			name: "RefreshTaikunClientArgs",
+			data: RefreshTaikunClientArgs{},
+		},
+		{
+			name: "RobotUserCapabilitiesArgs",
+			data: RobotUserCapabilitiesArgs{},
+		},
+		{
 			name: "CreateVirtualClusterArgs",
 			data: CreateVirtualClusterArgs{
 				ProjectID:       123,
-				Name:           "test-cluster",
+				Name:            "test-cluster",
 				WaitForCreation: true,
-				Timeout:        600,
+				Timeout:         600,
 			},
 		},
 		{
@@ -133,19 +193,93 @@ func TestArgumentStructs(t *testing.T) {
 				CatalogID:   123,
 				Repository:  "bitnami",
 				PackageName: "nginx",
+				Version:     "1.2.3",
+			},
+		},
+		{
+			name: "AddAppToCatalogWithParametersArgs",
+			data: AddAppToCatalogWithParametersArgs{
+				CatalogID:   123,
+				Repository:  "bitnami",
+				PackageName: "nginx",
+				Version:     "1.2.3",
+				Parameters: []AppParameter{
+					{
+						Key:   "replicaCount",
+						Value: "2",
+					},
+				},
 			},
 		},
 		{
 			name: "ListRepositoriesArgs",
 			data: ListRepositoriesArgs{
-				Limit:  10,
-				Offset: 0,
-				Search: "bitnami",
+				Limit:          10,
+				Offset:         0,
+				Search:         "bitnami",
+				SortBy:         "name",
+				SortDirection:  "asc",
+				ID:             "repo-123",
+				IsPrivate:      func() *bool { v := true; return &v }(),
+				OrganizationID: 321,
+			},
+		},
+		{
+			name: "ImportRepositoryArgs",
+			data: ImportRepositoryArgs{
+				Name:           "anywhere-cloud",
+				URL:            "oci://docker-private.infra.cloudera.com/cloudera-helm/awc-core/anywhere-cloud",
+				OrganizationID: 321,
+				Username:       "robot-user",
+				Password:       "robot-password",
+			},
+		},
+		{
+			name: "BindRepositoryArgs",
+			data: BindRepositoryArgs{
+				RepositoryID:               "repo-123",
+				Name:                       "anywhere-cloud",
+				RepositoryOrganizationName: "cloudera-helm",
+				OrganizationID:             321,
+			},
+		},
+		{
+			name: "UnbindRepositoryArgs",
+			data: UnbindRepositoryArgs{
+				RepositoryID:   "repo-123",
+				RepositoryIDs:  []string{"repo-123", "repo-456"},
+				OrganizationID: 321,
+			},
+		},
+		{
+			name: "DeleteRepositoryArgs",
+			data: DeleteRepositoryArgs{
+				AppRepoID:      654,
+				RepositoryID:   "repo-123",
+				OrganizationID: 321,
+			},
+		},
+		{
+			name: "UpdateRepositoryPasswordArgs",
+			data: UpdateRepositoryPasswordArgs{
+				RepositoryID:   "repo-123",
+				Username:       "robot-user",
+				Password:       "robot-password",
+				OrganizationID: 321,
 			},
 		},
 		{
 			name: "ListAvailablePackagesArgs",
 			data: ListAvailablePackagesArgs{
+				Repository: "bitnami",
+				Limit:      20,
+				Offset:     5,
+				Search:     "web",
+			},
+		},
+		{
+			name: "ListAvailableAppsArgs",
+			data: ListAvailableAppsArgs{
 				Repository: "bitnami",
 				Limit:      20,
 				Offset:     5,
@@ -170,6 +304,13 @@ func TestArgumentStructs(t *testing.T) {
 			},
 		},
 		{
+			name: "DeleteStandaloneVMArgs",
+			data: DeleteStandaloneVMArgs{
+				ProjectID: 123,
+				VMID:      456,
+			},
+		},
+		{
 			name: "ListCatalogAppsArgs",
 			data: ListCatalogAppsArgs{
 				CatalogID: 123,
@@ -178,11 +319,222 @@ func TestArgumentStructs(t *testing.T) {
 			},
 		},
 		{
+			name: "GetCatalogAppParamsArgs",
+			data: GetCatalogAppParamsArgs{
+				CatalogAppID: 456,
+				PackageID:    "cf2baee0-d026-42a0-8a5b-20d432ae1f01",
+				Version:      "0.5.0",
+			},
+		},
+		{
+			name: "SetCatalogAppDefaultParamsArgs",
+			data: SetCatalogAppDefaultParamsArgs{
+				CatalogAppID: 456,
+				Parameters: []AppParameter{
+					{
+						Key:   "replicaCount",
+						Value: "3",
+					},
+				},
+				MergeWithExisting: func() *bool { v := true; return &v }(),
+			},
+		},
+		{
 			name: "RemoveAppFromCatalogArgs",
 			data: RemoveAppFromCatalogArgs{
 				CatalogID:   123,
 				Repository:  "bitnami",
 				PackageName: "nginx",
+			},
+		},
+		{
+			name: "ListKubernetesResourcesArgs",
+			data: ListKubernetesResourcesArgs{
+				ProjectID:  123,
+				Kind:       "Pods",
+				Limit:      10,
+				SearchTerm: "test",
+			},
+		},
+		{
+			name: "DescribeKubernetesResourceArgs",
+			data: DescribeKubernetesResourceArgs{
+				ProjectID: 123,
+				Name:      "test-pod",
+				Kind:      "Pod",
+			},
+		},
+		{
+			name: "DeleteServersArgs",
+			data: DeleteServersArgs{
+				ProjectId:                123,
+				ServerIds:                []int32{456, 789},
+				ForceDeleteVClusters:     true,
+				DeleteAutoscalingServers: false,
+			},
+		},
+		{
+			name: "WaitForProjectArgs",
+			data: WaitForProjectArgs{
+				ProjectId:   123,
+				Timeout:     600,
+				WaitDeleted: true,
+			},
+		},
+		{
+			name: "WaitForAppArgs",
+			data: WaitForAppArgs{
+				ProjectAppId: 123,
+				Timeout:      300,
+				WaitDeleted:  true,
+			},
+		},
+		{
+			name: "JSONPayloadArgs",
+			data: JSONPayloadArgs{
+				Payload: `{"name":"example"}`,
+			},
+		},
+		{
+			name: "IDArgs",
+			data: IDArgs{
+				ID: 123,
+			},
+		},
+		{
+			name: "IDPayloadArgs",
+			data: IDPayloadArgs{
+				ID:      123,
+				Payload: `{"name":"example"}`,
+			},
+		},
+		{
+			name: "StringIDArgs",
+			data: StringIDArgs{
+				ID: "user-123",
+			},
+		},
+		{
+			name: "DomainScopedIDArgs",
+			data: DomainScopedIDArgs{
+				DomainID: 12,
+				ID:       34,
+			},
+		},
+		{
+			name: "DomainScopedStringIDArgs",
+			data: DomainScopedStringIDArgs{
+				DomainID: 12,
+				ID:       "user-123",
+			},
+		},
+		{
+			name: "GroupOrganizationPayloadArgs",
+			data: GroupOrganizationPayloadArgs{
+				GroupID:        12,
+				OrganizationID: 34,
+				Payload:        `{"role":"Manager"}`,
+			},
+		},
+		{
+			name: "ProjectIDArgs",
+			data: ProjectIDArgs{
+				ProjectID: 123,
+			},
+		},
+		{
+			name: "ProjectBackupCredentialArgs",
+			data: ProjectBackupCredentialArgs{
+				ProjectID:          123,
+				BackupCredentialID: 456,
+			},
+		},
+		{
+			name: "ProjectAICredentialArgs",
+			data: ProjectAICredentialArgs{
+				ProjectID:      123,
+				AICredentialID: 456,
+			},
+		},
+		{
+			name: "ProjectPolicyProfileArgs",
+			data: ProjectPolicyProfileArgs{
+				ProjectID:       123,
+				PolicyProfileID: 456,
+			},
+		},
+		{
+			name: "ProjectIDPayloadArgs",
+			data: ProjectIDPayloadArgs{
+				ProjectID: 123,
+				Payload:   `{"enabled":true}`,
+			},
+		},
+		{
+			name: "ProjectNameArgs",
+			data: ProjectNameArgs{
+				ProjectID: 123,
+				Name:      "backup-1",
+			},
+		},
+		{
+			name: "LockModeArgs",
+			data: LockModeArgs{
+				ID:   123,
+				Mode: "lock",
+			},
+		},
+		{
+			name: "SearchListArgs",
+			data: SearchListArgs{
+				Limit:          10,
+				Offset:         5,
+				CursorID:       7,
+				Search:         "example",
+				SortBy:         "name",
+				SortDirection:  "asc",
+				OrganizationID: 12,
+				DomainID:       34,
+				ID:             56,
+				SearchID:       "78",
+				CloudID:        90,
+			},
+		},
+		{
+			name: "ProjectSearchListArgs",
+			data: ProjectSearchListArgs{
+				ProjectID:      123,
+				Limit:          10,
+				Offset:         5,
+				Search:         "vm",
+				SortBy:         "name",
+				SortDirection:  "desc",
+				FilterBy:       "running",
+				OrganizationID: 12,
+				ID:             34,
+			},
+		},
+		{
+			name: "ImageListArgs",
+			data: ImageListArgs{
+				Provider:      "aws",
+				Mode:          "common",
+				CloudID:       123,
+				ProjectID:     456,
+				Limit:         10,
+				Offset:        5,
+				Search:        "ubuntu",
+				SortBy:        "name",
+				SortDirection: "asc",
+				Payload:       `{"region":"us-east-1"}`,
+			},
+		},
+		{
+			name: "StandaloneWindowsPasswordArgs",
+			data: StandaloneWindowsPasswordArgs{
+				ID:         123,
+				Key:        "secret",
+				ConfigPath: "/tmp/config",
 			},
 		},
 	}
