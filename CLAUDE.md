@@ -6,6 +6,8 @@ This project provides an MCP (Model Context Protocol) server for Cloudera Cloud 
 
 **Agent hint:** Taikun has been renamed to Cloudera Cloud Factory. Prefer the new name in user-facing text, while keeping legacy identifiers (like `taikungoclient`, `TAIKUN_*`, and `taikun-mcp`) when required for compatibility.
 
+**Agent hint (VM vs Kubernetes node):** When the user asks for a **VM** or **server**, they usually mean a **standalone VM** (`create-standalone-vm`, related standalone VM tools, `commit-project` as needed)—not a Kubernetes cluster server role. When they ask for a **node** (or **worker node**, **cluster node**), they usually mean **adding or scaling capacity on the project’s Kubernetes cluster** (e.g. `add-server-to-project` with the appropriate role, then `commit-project`)—not a standalone VM. Confirm if the request is ambiguous.
+
 ## Resources
 
 ### Official Cloudera Cloud Factory (Taikun) Resources
