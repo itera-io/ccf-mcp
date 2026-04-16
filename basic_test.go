@@ -166,6 +166,10 @@ func TestArgumentStructs(t *testing.T) {
 			data: RefreshTaikunClientArgs{},
 		},
 		{
+			name: "ServerVersionArgs",
+			data: ServerVersionArgs{},
+		},
+		{
 			name: "RobotUserCapabilitiesArgs",
 			data: RobotUserCapabilitiesArgs{},
 		},

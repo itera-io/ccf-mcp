@@ -27,7 +27,10 @@ var (
 	taikunClient *taikungoclient.Client
 )
 
-const defaultAPIHost = "api-latest.osc1.sjc.cloudera.com"
+const (
+	defaultAPIHost = "api-latest.osc1.sjc.cloudera.com"
+	mcpServerName  = "cloudera-cloud-factory-mcp"
+)
 
 // Response structs for JSON formatting
 type ErrorResponse struct {
@@ -42,6 +45,8 @@ type SuccessResponse struct {
 
 type RefreshTaikunClientArgs struct{}
 
+type ServerVersionArgs struct{}
+
 type RefreshTaikunClientResponse struct {
 	Message             string   `json:"message"`
 	Success             bool     `json:"success"`
@@ -49,6 +54,16 @@ type RefreshTaikunClientResponse struct {
 	OrganizationName    string   `json:"organizationName,omitempty"`
 	Scopes              []string `json:"scopes,omitempty"`
 	ScopeDiscoveryError string   `json:"scopeDiscoveryError,omitempty"`
+}
+
+type ServerVersionResponse struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	Commit  string `json:"commit"`
+	Date    string `json:"date"`
+	BuiltBy string `json:"builtBy"`
+	Success bool   `json:"success"`
+	Message string `json:"message"`
 }
 
 type ProjectSummary struct {
@@ -494,6 +509,18 @@ func newRefreshTaikunClientResponse(robotCtx RobotUserContext) RefreshTaikunClie
 	}
 }
 
+func serverVersion() *mcp_golang.ToolResponse {
+	return createJSONResponse(ServerVersionResponse{
+		Name:    mcpServerName,
+		Version: version,
+		Commit:  commit,
+		Date:    date,
+		BuiltBy: builtBy,
+		Success: true,
+		Message: fmt.Sprintf("Loaded MCP server version information for %s", mcpServerName),
+	})
+}
+
 func main() {
 	// Handle version command
 	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
@@ -507,7 +534,11 @@ func main() {
 	initLogger()
 	logger.Printf("Starting Cloudera Cloud Factory MCP server v%s", version)
 
-	server := mcp_golang.NewServer(stdio.NewStdioServerTransport())
+	server := mcp_golang.NewServer(
+		stdio.NewStdioServerTransport(),
+		mcp_golang.WithName(mcpServerName),
+		mcp_golang.WithVersion(version),
+	)
 	logger.Println("MCP server created")
 
 	// Initialize the Cloudera Cloud Factory client once
@@ -519,7 +550,15 @@ func main() {
 
 	// --- MCP Tool Registrations ---
 
-	err := registerScopedTool(server, "refresh-taikun-client", "Refresh the Cloudera Cloud Factory API client using current environment credentials", func(args RefreshTaikunClientArgs) (*mcp_golang.ToolResponse, error) {
+	err := registerScopedTool(server, "server-version", "Show MCP server version and build metadata", func(args ServerVersionArgs) (*mcp_golang.ToolResponse, error) {
+		return serverVersion(), nil
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register server-version tool: %v", err)
+	}
+	logger.Println("Registered server-version tool")
+
+	err = registerScopedTool(server, "refresh-taikun-client", "Refresh the Cloudera Cloud Factory API client using current environment credentials", func(args RefreshTaikunClientArgs) (*mcp_golang.ToolResponse, error) {
 		return refreshTaikunClient(), nil
 	})
 	if err != nil {

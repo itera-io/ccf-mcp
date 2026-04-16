@@ -120,6 +120,9 @@ func createStandaloneVM(client *taikungoclient.Client, args JSONPayloadArgs) (*m
 	if apiResp != nil && apiResp.GetMessage() != "" {
 		message = apiResp.GetMessage()
 	}
+	if projectID, ok := command.GetProjectIdOk(); ok {
+		recordPendingStandaloneVMCreate(*projectID)
+	}
 
 	resp := map[string]interface{}{
 		"message":         message,

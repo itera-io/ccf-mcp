@@ -16,6 +16,22 @@ import (
 var (
 	projectServerAddLocks   = map[int32]*sync.Mutex{}
 	projectServerAddLocksMu sync.Mutex
+
+	projectPendingCommitChanges   = map[int32]pendingProjectCommitChanges{}
+	projectPendingCommitChangesMu sync.Mutex
+)
+
+type pendingProjectCommitChanges struct {
+	standaloneVMCreates int
+	serverAdds          int
+}
+
+type projectCommitMode string
+
+const (
+	projectCommitModeAuto    projectCommitMode = "auto"
+	projectCommitModeProject projectCommitMode = "project"
+	projectCommitModeVM      projectCommitMode = "vm"
 )
 
 func getProjectServerAddLock(projectId int32) *sync.Mutex {
@@ -28,6 +44,82 @@ func getProjectServerAddLock(projectId int32) *sync.Mutex {
 		projectServerAddLocks[projectId] = lock
 	}
 	return lock
+}
+
+func recordPendingStandaloneVMCreate(projectID int32) {
+	if projectID <= 0 {
+		return
+	}
+
+	projectPendingCommitChangesMu.Lock()
+	defer projectPendingCommitChangesMu.Unlock()
+
+	state := projectPendingCommitChanges[projectID]
+	state.standaloneVMCreates++
+	projectPendingCommitChanges[projectID] = state
+}
+
+func recordPendingServerAdd(projectID int32) {
+	if projectID <= 0 {
+		return
+	}
+
+	projectPendingCommitChangesMu.Lock()
+	defer projectPendingCommitChangesMu.Unlock()
+
+	state := projectPendingCommitChanges[projectID]
+	state.serverAdds++
+	projectPendingCommitChanges[projectID] = state
+}
+
+func clearPendingProjectCommitChanges(projectID int32) {
+	projectPendingCommitChangesMu.Lock()
+	defer projectPendingCommitChangesMu.Unlock()
+
+	delete(projectPendingCommitChanges, projectID)
+}
+
+func pendingProjectCommitMode(projectID int32) projectCommitMode {
+	if projectID <= 0 {
+		return projectCommitModeAuto
+	}
+
+	projectPendingCommitChangesMu.Lock()
+	defer projectPendingCommitChangesMu.Unlock()
+
+	state, ok := projectPendingCommitChanges[projectID]
+	if !ok {
+		return projectCommitModeAuto
+	}
+	if state.serverAdds > 0 {
+		return projectCommitModeProject
+	}
+	if state.standaloneVMCreates > 0 {
+		return projectCommitModeVM
+	}
+	return projectCommitModeAuto
+}
+
+func executeProjectCommitMode(projectID int32, mode projectCommitMode, projectCommit func() (projectCommitResult, *apiErrorInfo), fallbackCommit func() (projectCommitResult, *apiErrorInfo), vmCommit func() (projectCommitResult, *apiErrorInfo)) (projectCommitResult, *apiErrorInfo) {
+	var (
+		result    projectCommitResult
+		errorInfo *apiErrorInfo
+	)
+
+	switch mode {
+	case projectCommitModeVM:
+		result, errorInfo = vmCommit()
+	case projectCommitModeProject:
+		result, errorInfo = projectCommit()
+	default:
+		result, errorInfo = fallbackCommit()
+	}
+
+	if errorInfo == nil {
+		clearPendingProjectCommitChanges(projectID)
+	}
+
+	return result, errorInfo
 }
 
 func bindFlavorsToProject(client *taikungoclient.Client, args BindFlavorsArgs) (*mcp_golang.ToolResponse, error) {
@@ -157,6 +249,7 @@ func addServerToProject(client *taikungoclient.Client, args AddServerArgs) (*mcp
 		}
 
 		if int32(len(matched)) >= count {
+			recordPendingServerAdd(args.ProjectId)
 			return createJSONResponse(AddServerResponse{
 				Message:  fmt.Sprintf("Successfully added %d server(s) of type %s with flavor %s to project %d", count, args.Role, args.Flavor, args.ProjectId),
 				Success:  true,
@@ -168,6 +261,7 @@ func addServerToProject(client *taikungoclient.Client, args AddServerArgs) (*mcp
 		}
 
 		if time.Now().After(verifyDeadline) {
+			recordPendingServerAdd(args.ProjectId)
 			return createJSONResponse(AddServerResponse{
 				Message:  fmt.Sprintf("Server creation request accepted but not verified within timeout (expected %d)", count),
 				Success:  false,
@@ -201,6 +295,24 @@ type projectCommitResult struct {
 }
 
 func commitProjectWithFallback(client *taikungoclient.Client, projectID int32) (projectCommitResult, *apiErrorInfo) {
+	mode := pendingProjectCommitMode(projectID)
+
+	return executeProjectCommitMode(
+		projectID,
+		mode,
+		func() (projectCommitResult, *apiErrorInfo) {
+			return commitProjectWithReactiveFallback(client, projectID)
+		},
+		func() (projectCommitResult, *apiErrorInfo) {
+			return commitProjectWithReactiveFallback(client, projectID)
+		},
+		func() (projectCommitResult, *apiErrorInfo) {
+			return commitProjectVMChanges(client, projectID)
+		},
+	)
+}
+
+func commitProjectChanges(client *taikungoclient.Client, projectID int32) (projectCommitResult, *apiErrorInfo) {
 	ctx := context.Background()
 
 	command := taikuncore.NewProjectDeploymentCommitCommand()
@@ -210,10 +322,7 @@ func commitProjectWithFallback(client *taikungoclient.Client, projectID int32) (
 		ProjectDeploymentCommitCommand(*command).
 		Execute()
 
-	if shouldUseVMCommit, errorInfo := commitProjectFallbackDecision(httpResponse, err); errorInfo.Message != "" {
-		if shouldUseVMCommit {
-			return commitProjectVMChanges(client, projectID)
-		}
+	if _, errorInfo := commitProjectFallbackDecision(httpResponse, err); errorInfo.Message != "" {
 		return projectCommitResult{}, &errorInfo
 	}
 
@@ -221,6 +330,17 @@ func commitProjectWithFallback(client *taikungoclient.Client, projectID int32) (
 		Mode:    "project",
 		Message: fmt.Sprintf("Successfully committed project %d deployment. Provisioning standalone VMs or other changes may take several minutes; an initial full Kubernetes cluster deploy often takes 10 to 30 minutes.", projectID),
 	}, nil
+}
+
+func commitProjectWithReactiveFallback(client *taikungoclient.Client, projectID int32) (projectCommitResult, *apiErrorInfo) {
+	result, errorInfo := commitProjectChanges(client, projectID)
+	if errorInfo == nil {
+		return result, nil
+	}
+	if commitProjectNeedsVMMessage(errorInfo.Message) {
+		return commitProjectVMChanges(client, projectID)
+	}
+	return projectCommitResult{}, errorInfo
 }
 
 func commitProjectVMChanges(client *taikungoclient.Client, projectID int32) (projectCommitResult, *apiErrorInfo) {

@@ -55,6 +55,7 @@ var (
 )
 
 var toolRequiredScopes = map[string][]string{
+	"server-version":               {},
 	"refresh-taikun-client":        {},
 	"robot-user-capabilities":      {},
 	"create-virtual-cluster":       {"scope:virtual-clusters:write"},
