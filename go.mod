@@ -4,10 +4,10 @@ go 1.25.0
 
 require (
 	github.com/itera-io/taikungoclient v0.0.0-20260402175108-0cee710d0ee2
-	github.com/metoro-io/mcp-golang v0.14.0
+	github.com/metoro-io/mcp-golang v0.16.1
 	github.com/tidwall/gjson v1.18.0
-	k8s.io/apimachinery v0.35.0
-	k8s.io/client-go v0.35.0
+	k8s.io/apimachinery v0.35.4
+	k8s.io/client-go v0.35.4
 )
 
 require (
@@ -32,7 +32,7 @@ require (
 	golang.org/x/text v0.31.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/api v0.35.0 // indirect
+	k8s.io/api v0.35.4 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20250910181357-589584f1c912 // indirect
 	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4 // indirect
