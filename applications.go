@@ -14,6 +14,11 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+const (
+	defaultInstallAppTimeoutSeconds = 600
+	installAppTimeoutHint           = "Larger applications may need a longer install timeout; set timeout explicitly when installs routinely take more than 10 minutes."
+)
+
 type AppParameter struct {
 	Key   string `json:"key" jsonschema:"required,description=Parameter key"`
 	Value string `json:"value" jsonschema:"required,description=Parameter value"`
@@ -27,7 +32,7 @@ type InstallAppArgs struct {
 	ExtraValues               string         `json:"extraValues,omitempty" jsonschema:"description=Base64-encoded YAML extra values for the application (optional)"`
 	AutoSync                  bool           `json:"autoSync,omitempty" jsonschema:"description=Enable automatic synchronization (default: false)"`
 	TaikunLinkEnabled         bool           `json:"taikunLinkEnabled,omitempty" jsonschema:"description=Enable Cloudera Cloud Factory (Taikun) link integration (default: false)"`
-	Timeout                   int32          `json:"timeout,omitempty" jsonschema:"description=Installation timeout in seconds (optional)"`
+	Timeout                   int32          `json:"timeout,omitempty" jsonschema:"description=Installation timeout in seconds (default: 600). Larger applications may need a bigger timeout."`
 	Parameters                []AppParameter `json:"parameters,omitempty" jsonschema:"description=Application parameters as key-value pairs (optional)"`
 	UseCatalogDefaults        *bool          `json:"useCatalogDefaults,omitempty" jsonschema:"description=Use catalog default parameters as a base (default: true)"`
 	WaitForReady              bool           `json:"waitForReady,omitempty" jsonschema:"description=Wait for application to be ready before returning (default: false)"`
@@ -182,8 +187,16 @@ func syncProjectApp(client *taikungoclient.Client, projectAppID int32, timeout i
 	return nil
 }
 
+func resolveInstallAppTimeout(timeout int32) (int32, bool) {
+	if timeout > 0 {
+		return timeout, false
+	}
+	return defaultInstallAppTimeoutSeconds, true
+}
+
 func installApp(client *taikungoclient.Client, args InstallAppArgs) (*mcp_golang.ToolResponse, error) {
 	ctx := context.Background()
+	installTimeout, timeoutDefaulted := resolveInstallAppTimeout(args.Timeout)
 
 	createCmd := taikuncore.NewCreateProjectAppCommand()
 	createCmd.SetName(args.Name)
@@ -192,13 +205,10 @@ func installApp(client *taikungoclient.Client, args InstallAppArgs) (*mcp_golang
 	createCmd.SetCatalogAppId(args.CatalogAppID)
 	createCmd.SetAutoSync(args.AutoSync)
 	createCmd.SetTaikunLinkEnabled(args.TaikunLinkEnabled)
+	createCmd.SetTimeout(installTimeout)
 
 	if args.ExtraValues != "" {
 		createCmd.SetExtraValues(args.ExtraValues)
-	}
-
-	if args.Timeout > 0 {
-		createCmd.SetTimeout(args.Timeout)
 	}
 
 	useCatalogDefaults := true
@@ -356,6 +366,9 @@ func installApp(client *taikungoclient.Client, args InstallAppArgs) (*mcp_golang
 		Name               string         `json:"name"`
 		Namespace          string         `json:"namespace"`
 		Status             string         `json:"status"`
+		TimeoutSeconds     int32          `json:"timeoutSeconds"`
+		TimeoutDefaulted   bool           `json:"timeoutDefaulted"`
+		Hint               string         `json:"hint,omitempty"`
 		UseCatalogDefaults bool           `json:"useCatalogDefaults"`
 		ParametersApplied  []AppParameter `json:"parametersApplied,omitempty"`
 	}
@@ -382,12 +395,17 @@ func installApp(client *taikungoclient.Client, args InstallAppArgs) (*mcp_golang
 		Name:               args.Name,
 		Namespace:          args.Namespace,
 		Status:             "initiated",
+		TimeoutSeconds:     installTimeout,
+		TimeoutDefaulted:   timeoutDefaulted,
 		UseCatalogDefaults: useCatalogDefaults,
 		ParametersApplied:  appliedParams,
 	}
 
 	if args.WaitForReady {
 		responseData.Status = "ready"
+	}
+	if timeoutDefaulted {
+		responseData.Hint = installAppTimeoutHint
 	}
 
 	return createJSONResponse(responseData), nil

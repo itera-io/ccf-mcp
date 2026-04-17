@@ -726,7 +726,7 @@ func main() {
 	}
 	logger.Println("Registered catalog-app-defaults-set tool")
 
-	err = registerScopedTool(server, "app-install", "Install a new application instance with optional defaults and overrides", func(args InstallAppArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "app-install", "Install a new application instance with optional defaults and overrides. If timeout is omitted, the install request defaults to 10 minutes; larger applications may need a higher timeout.", func(args InstallAppArgs) (*mcp_golang.ToolResponse, error) {
 		return installApp(taikunClient, args)
 	})
 	if err != nil {
