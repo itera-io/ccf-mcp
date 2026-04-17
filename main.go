@@ -838,7 +838,15 @@ func main() {
 	}
 	logger.Println("Registered list-kubeconfig-roles tool")
 
-	err = registerScopedTool(server, "list-kubernetes-resources", "List specialized Kubernetes resources in a project", func(args ListKubernetesResourcesArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "list-kubernetes-resource-kinds", "Show the supported Kubernetes resource kinds for list, describe, and delete operations. Kind matching is case-insensitive.", func(args KubernetesResourceKindsArgs) (*mcp_golang.ToolResponse, error) {
+		return listKubernetesResourceKinds(), nil
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register list-kubernetes-resource-kinds tool: %v", err)
+	}
+	logger.Println("Registered list-kubernetes-resource-kinds tool")
+
+	err = registerScopedTool(server, "list-kubernetes-resources", "List specialized Kubernetes resources in a project. Kind matching is case-insensitive; call list-kubernetes-resource-kinds to inspect supported listKinds and unavailableListKinds.", func(args ListKubernetesResourcesArgs) (*mcp_golang.ToolResponse, error) {
 		return listKubernetesResources(taikunClient, args)
 	})
 	if err != nil {
@@ -846,7 +854,7 @@ func main() {
 	}
 	logger.Println("Registered list-kubernetes-resources tool")
 
-	err = registerScopedTool(server, "describe-kubernetes-resource", "Describe a specialized Kubernetes resource in a project", func(args DescribeKubernetesResourceArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "describe-kubernetes-resource", "Describe a specialized Kubernetes resource in a project. Kind matching is case-insensitive; call list-kubernetes-resource-kinds to inspect supported operationKinds.", func(args DescribeKubernetesResourceArgs) (*mcp_golang.ToolResponse, error) {
 		return describeKubernetesResource(taikunClient, args)
 	})
 	if err != nil {
@@ -854,7 +862,7 @@ func main() {
 	}
 	logger.Println("Registered describe-kubernetes-resource tool")
 
-	err = registerScopedTool(server, "delete-kubernetes-resource", "Delete a Kubernetes resource", func(args DeleteKubernetesResourceArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "delete-kubernetes-resource", "Delete a Kubernetes resource. Kind matching is case-insensitive; call list-kubernetes-resource-kinds to inspect supported operationKinds.", func(args DeleteKubernetesResourceArgs) (*mcp_golang.ToolResponse, error) {
 		return deleteKubernetesResource(taikunClient, args)
 	})
 	if err != nil {

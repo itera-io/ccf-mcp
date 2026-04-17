@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -50,5 +51,91 @@ func TestParseReadyCountsRejectsOutOfRangeValues(t *testing.T) {
 	ready, total := parseReadyCounts("12/2147483648")
 	if ready != 0 || total != 0 {
 		t.Fatalf("expected out-of-range ready counts to return 0/0, got %d/%d", ready, total)
+	}
+}
+
+func TestNormalizeListKubernetesKindCaseInsensitive(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{input: "pods", expected: "Pods"},
+		{input: "PODS", expected: "Pods"},
+		{input: "sts", expected: "Sts"},
+	}
+
+	for _, tt := range tests {
+		got, ok := normalizeListKubernetesKind(tt.input)
+		if !ok {
+			t.Fatalf("expected %q to normalize successfully", tt.input)
+		}
+		if got != tt.expected {
+			t.Fatalf("expected %q to normalize to %q, got %q", tt.input, tt.expected, got)
+		}
+	}
+}
+
+func TestNormalizeOperationKubernetesKindCaseInsensitive(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{input: "POD", expected: "Pod"},
+		{input: "deployment", expected: "Deployment"},
+		{input: "service", expected: "Service"},
+	}
+
+	for _, tt := range tests {
+		got, ok := normalizeOperationKubernetesKind(tt.input)
+		if !ok {
+			t.Fatalf("expected %q to normalize successfully", tt.input)
+		}
+		if string(got) != tt.expected {
+			t.Fatalf("expected %q to normalize to %q, got %q", tt.input, tt.expected, got)
+		}
+	}
+}
+
+func TestListKubernetesResourceKindsResponse(t *testing.T) {
+	result := decodeToolResponseJSON[KubernetesResourceKindsResponse](t, listKubernetesResourceKinds())
+	if !result.Success {
+		t.Fatalf("expected success response, got %+v", result)
+	}
+	if !result.CaseInsensitive {
+		t.Fatalf("expected resource kind discovery to mark matching as case-insensitive")
+	}
+	if !slices.Contains(result.ListKinds, "Pods") {
+		t.Fatalf("expected listKinds to include Pods, got %+v", result.ListKinds)
+	}
+	if !slices.Contains(result.OperationKinds, "Pod") {
+		t.Fatalf("expected operationKinds to include Pod, got %+v", result.OperationKinds)
+	}
+	foundUnavailable := false
+	for _, kind := range result.UnavailableListKinds {
+		if kind.Kind == "CronJobs" && strings.Contains(kind.Reason, "not available") {
+			foundUnavailable = true
+			break
+		}
+	}
+	if !foundUnavailable {
+		t.Fatalf("expected unavailable list kinds to include CronJobs, got %+v", result.UnavailableListKinds)
+	}
+}
+
+func TestListKubernetesResourcesInvalidKindIncludesAllowedKinds(t *testing.T) {
+	response, err := listKubernetesResources(nil, ListKubernetesResourcesArgs{
+		ProjectID: 1,
+		Kind:      "NotARealKind",
+	})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	result := decodeToolResponseJSON[ErrorResponse](t, response)
+	if !strings.Contains(result.Error, "Invalid resource kind") {
+		t.Fatalf("expected invalid resource kind error, got %+v", result)
+	}
+	if !strings.Contains(result.Details, "Pods") || !strings.Contains(result.Details, "Sts") {
+		t.Fatalf("expected allowed list kinds in details, got %+v", result)
 	}
 }

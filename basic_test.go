@@ -352,6 +352,10 @@ func TestArgumentStructs(t *testing.T) {
 			},
 		},
 		{
+			name: "KubernetesResourceKindsArgs",
+			data: KubernetesResourceKindsArgs{},
+		},
+		{
 			name: "ListKubernetesResourcesArgs",
 			data: ListKubernetesResourcesArgs{
 				ProjectID:  123,

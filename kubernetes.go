@@ -431,7 +431,7 @@ func splitKubernetesYaml(payload string) ([]string, error) {
 
 type DeleteKubernetesResourceArgs struct {
 	ProjectID int32  `json:"projectId" jsonschema:"required,description=The project ID of the resource"`
-	Kind      string `json:"kind" jsonschema:"required,description=The kind of the resource (e.g., Pod, Deployment, Service)"`
+	Kind      string `json:"kind" jsonschema:"required,description=The kind of the resource to delete. Matching is case-insensitive; examples include Pod, Deployment, and Service. Call list-kubernetes-resource-kinds to inspect supported operationKinds."`
 	Name      string `json:"name" jsonschema:"required,description=The name of the resource to delete"`
 	Namespace string `json:"namespace,omitempty" jsonschema:"description=The namespace of the resource (optional, defaults to 'default')"`
 }
@@ -459,7 +459,7 @@ type GetKubeConfigArgs struct {
 
 type ListKubernetesResourcesArgs struct {
 	ProjectID  int32  `json:"projectId" jsonschema:"required,description=The project ID to list resources from"`
-	Kind       string `json:"kind" jsonschema:"required,description=The kind of Kubernetes resource (e.g., Pods, Deployments, Services, Namespaces, ConfigMaps, Secrets, Ingress, CronJobs, DaemonSets, Jobs, Nodes, Pvcs, StorageClasses, Sts)"`
+	Kind       string `json:"kind" jsonschema:"required,description=The kind of Kubernetes resource to list. Matching is case-insensitive and uses list-specific canonical names such as Pods, Deployments, Services, Namespaces, ConfigMaps, Secrets, Ingress, DaemonSets, Nodes, Pvcs, and Sts. Call list-kubernetes-resource-kinds to inspect supported listKinds and unavailableListKinds."`
 	Limit      int32  `json:"limit,omitempty" jsonschema:"description=Maximum number of results to return (optional)"`
 	Offset     int32  `json:"offset,omitempty" jsonschema:"description=Number of results to skip (optional)"`
 	SearchTerm string `json:"searchTerm,omitempty" jsonschema:"description=Search term to filter results (optional)"`
@@ -468,7 +468,7 @@ type ListKubernetesResourcesArgs struct {
 type DescribeKubernetesResourceArgs struct {
 	ProjectID int32  `json:"projectId" jsonschema:"required,description=The project ID of the resource"`
 	Name      string `json:"name" jsonschema:"required,description=The name of the resource"`
-	Kind      string `json:"kind" jsonschema:"required,description=The kind of the resource (e.g., Pod, Deployment, Service, etc.)"`
+	Kind      string `json:"kind" jsonschema:"required,description=The kind of the resource to describe. Matching is case-insensitive; examples include Pod, Deployment, and Service. Call list-kubernetes-resource-kinds to inspect supported operationKinds."`
 	Namespace string `json:"namespace,omitempty" jsonschema:"description=The namespace of the resource (optional, defaults to 'default')"`
 }
 
@@ -479,9 +479,169 @@ type PatchKubernetesResourceArgs struct {
 	Namespace string `json:"namespace,omitempty" jsonschema:"description=The namespace of the resource (optional, defaults to 'default')"`
 }
 
+type KubernetesResourceKindsArgs struct{}
+
 type ListKubeConfigRolesArgs struct{}
 
 const awsKubeConfigRoleID int32 = 1
+
+type kubernetesListKindSpec struct {
+	resourcePath       string
+	unavailableMessage string
+}
+
+type KubernetesUnavailableResourceKind struct {
+	Kind   string `json:"kind"`
+	Reason string `json:"reason"`
+}
+
+type KubernetesResourceKindsResponse struct {
+	ListKinds            []string                            `json:"listKinds"`
+	OperationKinds       []string                            `json:"operationKinds"`
+	UnavailableListKinds []KubernetesUnavailableResourceKind `json:"unavailableListKinds,omitempty"`
+	CaseInsensitive      bool                                `json:"caseInsensitive"`
+	Success              bool                                `json:"success"`
+	Message              string                              `json:"message"`
+}
+
+var kubernetesListKindOrder = []string{
+	"Pods",
+	"Deployments",
+	"Services",
+	"Namespaces",
+	"ConfigMaps",
+	"Secrets",
+	"Ingress",
+	"CronJobs",
+	"DaemonSets",
+	"Jobs",
+	"Nodes",
+	"Pvcs",
+	"StorageClasses",
+	"Sts",
+}
+
+var kubernetesListKindSpecs = map[string]kubernetesListKindSpec{
+	"Pods": {
+		resourcePath: "pods",
+	},
+	"Deployments": {
+		resourcePath: "deployments",
+	},
+	"Services": {
+		resourcePath: "service",
+	},
+	"Namespaces": {},
+	"ConfigMaps": {
+		resourcePath: "configmap",
+	},
+	"Secrets": {
+		resourcePath: "secret",
+	},
+	"Ingress": {
+		resourcePath: "ingress",
+	},
+	"CronJobs": {
+		unavailableMessage: "CronJobs listing is not available through the Cloudera Cloud Factory Kubernetes list API",
+	},
+	"DaemonSets": {
+		resourcePath: "daemonset",
+	},
+	"Jobs": {
+		unavailableMessage: "Jobs listing is not available through the Cloudera Cloud Factory Kubernetes list API",
+	},
+	"Nodes": {
+		resourcePath: "nodes",
+	},
+	"Pvcs": {
+		resourcePath: "pvc",
+	},
+	"StorageClasses": {
+		unavailableMessage: "StorageClasses listing is not available through the Cloudera Cloud Factory Kubernetes list API",
+	},
+	"Sts": {
+		resourcePath: "sts",
+	},
+}
+
+func normalizeListKubernetesKind(kind string) (string, bool) {
+	trimmedKind := strings.TrimSpace(kind)
+	for _, canonicalKind := range kubernetesListKindOrder {
+		if strings.EqualFold(canonicalKind, trimmedKind) {
+			return canonicalKind, true
+		}
+	}
+	return "", false
+}
+
+func normalizeOperationKubernetesKind(kind string) (taikuncore.EKubernetesResource, bool) {
+	trimmedKind := strings.TrimSpace(kind)
+	for _, canonicalKind := range taikuncore.AllowedEKubernetesResourceEnumValues {
+		if strings.EqualFold(string(canonicalKind), trimmedKind) {
+			return canonicalKind, true
+		}
+	}
+	return "", false
+}
+
+func kubernetesRecognizedListKinds() []string {
+	return append([]string(nil), kubernetesListKindOrder...)
+}
+
+func kubernetesSupportedListKinds() []string {
+	supportedKinds := make([]string, 0, len(kubernetesListKindOrder))
+	for _, kind := range kubernetesListKindOrder {
+		if kubernetesListKindSpecs[kind].unavailableMessage == "" {
+			supportedKinds = append(supportedKinds, kind)
+		}
+	}
+	return supportedKinds
+}
+
+func kubernetesUnavailableListKinds() []KubernetesUnavailableResourceKind {
+	unavailableKinds := make([]KubernetesUnavailableResourceKind, 0)
+	for _, kind := range kubernetesListKindOrder {
+		spec := kubernetesListKindSpecs[kind]
+		if spec.unavailableMessage == "" {
+			continue
+		}
+		unavailableKinds = append(unavailableKinds, KubernetesUnavailableResourceKind{
+			Kind:   kind,
+			Reason: spec.unavailableMessage,
+		})
+	}
+	return unavailableKinds
+}
+
+func kubernetesOperationKindStrings() []string {
+	operationKinds := make([]string, 0, len(taikuncore.AllowedEKubernetesResourceEnumValues))
+	for _, kind := range taikuncore.AllowedEKubernetesResourceEnumValues {
+		operationKinds = append(operationKinds, string(kind))
+	}
+	return operationKinds
+}
+
+func invalidKubernetesKindResponse(kind string, operation string, allowedKinds []string) *mcp_golang.ToolResponse {
+	return createJSONResponse(ErrorResponse{
+		Error: fmt.Sprintf("Invalid resource kind: %s", kind),
+		Details: fmt.Sprintf(
+			"Allowed kinds for %s are case-insensitive and must match one of: %s. Call list-kubernetes-resource-kinds for the supported listKinds and operationKinds.",
+			operation,
+			strings.Join(allowedKinds, ", "),
+		),
+	})
+}
+
+func listKubernetesResourceKinds() *mcp_golang.ToolResponse {
+	return createJSONResponse(KubernetesResourceKindsResponse{
+		ListKinds:            kubernetesSupportedListKinds(),
+		OperationKinds:       kubernetesOperationKindStrings(),
+		UnavailableListKinds: kubernetesUnavailableListKinds(),
+		CaseInsensitive:      true,
+		Success:              true,
+		Message:              "Loaded supported Kubernetes resource kinds for list and resource operations",
+	})
+}
 
 func resolveProjectCloudType(client *taikungoclient.Client, projectID int32) (string, *mcp_golang.ToolResponse) {
 	ctx := context.Background()
@@ -866,10 +1026,21 @@ func listKubernetesError(kind string, response *http.Response, err error) *mcp_g
 func listKubernetesResources(client *taikungoclient.Client, args ListKubernetesResourcesArgs) (*mcp_golang.ToolResponse, error) {
 	ctx := context.Background()
 	var result interface{}
+	canonicalKind, ok := normalizeListKubernetesKind(args.Kind)
+	if !ok {
+		return invalidKubernetesKindResponse(args.Kind, "list-kubernetes-resources", kubernetesRecognizedListKinds()), nil
+	}
+	spec := kubernetesListKindSpecs[canonicalKind]
+	if spec.unavailableMessage != "" {
+		return createJSONResponse(ErrorResponse{
+			Error:   spec.unavailableMessage,
+			Details: "Call list-kubernetes-resource-kinds to inspect the supported listKinds and unavailableListKinds.",
+		}), nil
+	}
 
-	switch args.Kind {
+	switch canonicalKind {
 	case "Pods":
-		pods, response, err := fetchKubernetesListItems[podListItem](ctx, client, args.ProjectID, "pods", args.Limit, args.Offset, args.SearchTerm)
+		pods, response, err := fetchKubernetesListItems[podListItem](ctx, client, args.ProjectID, spec.resourcePath, args.Limit, args.Offset, args.SearchTerm)
 		if err != nil {
 			return listKubernetesError("Pods", response, err), nil
 		}
@@ -886,7 +1057,7 @@ func listKubernetesResources(client *taikungoclient.Client, args ListKubernetesR
 		}
 		result = summaries
 	case "Deployments":
-		deployments, response, err := fetchKubernetesListItems[deploymentListItem](ctx, client, args.ProjectID, "deployments", args.Limit, args.Offset, args.SearchTerm)
+		deployments, response, err := fetchKubernetesListItems[deploymentListItem](ctx, client, args.ProjectID, spec.resourcePath, args.Limit, args.Offset, args.SearchTerm)
 		if err != nil {
 			return listKubernetesError("Deployments", response, err), nil
 		}
@@ -905,7 +1076,7 @@ func listKubernetesResources(client *taikungoclient.Client, args ListKubernetesR
 		}
 		result = summaries
 	case "Services":
-		services, response, err := fetchKubernetesListItems[serviceListItem](ctx, client, args.ProjectID, "service", args.Limit, args.Offset, args.SearchTerm)
+		services, response, err := fetchKubernetesListItems[serviceListItem](ctx, client, args.ProjectID, spec.resourcePath, args.Limit, args.Offset, args.SearchTerm)
 		if err != nil {
 			return listKubernetesError("Services", response, err), nil
 		}
@@ -950,7 +1121,7 @@ func listKubernetesResources(client *taikungoclient.Client, args ListKubernetesR
 		}
 		result = summaries
 	case "ConfigMaps":
-		configMaps, response, err := fetchKubernetesListItems[configMapListItem](ctx, client, args.ProjectID, "configmap", args.Limit, args.Offset, args.SearchTerm)
+		configMaps, response, err := fetchKubernetesListItems[configMapListItem](ctx, client, args.ProjectID, spec.resourcePath, args.Limit, args.Offset, args.SearchTerm)
 		if err != nil {
 			return listKubernetesError("ConfigMaps", response, err), nil
 		}
@@ -965,7 +1136,7 @@ func listKubernetesResources(client *taikungoclient.Client, args ListKubernetesR
 		}
 		result = summaries
 	case "Secrets":
-		secrets, response, err := fetchKubernetesListItems[secretListItem](ctx, client, args.ProjectID, "secret", args.Limit, args.Offset, args.SearchTerm)
+		secrets, response, err := fetchKubernetesListItems[secretListItem](ctx, client, args.ProjectID, spec.resourcePath, args.Limit, args.Offset, args.SearchTerm)
 		if err != nil {
 			return listKubernetesError("Secrets", response, err), nil
 		}
@@ -981,7 +1152,7 @@ func listKubernetesResources(client *taikungoclient.Client, args ListKubernetesR
 		}
 		result = summaries
 	case "Ingress":
-		ingresses, response, err := fetchKubernetesListItems[ingressListItem](ctx, client, args.ProjectID, "ingress", args.Limit, args.Offset, args.SearchTerm)
+		ingresses, response, err := fetchKubernetesListItems[ingressListItem](ctx, client, args.ProjectID, spec.resourcePath, args.Limit, args.Offset, args.SearchTerm)
 		if err != nil {
 			return listKubernetesError("Ingress", response, err), nil
 		}
@@ -1000,12 +1171,8 @@ func listKubernetesResources(client *taikungoclient.Client, args ListKubernetesR
 			})
 		}
 		result = summaries
-	case "CronJobs":
-		return createJSONResponse(ErrorResponse{
-			Error: "CronJobs listing is not available through the Cloudera Cloud Factory Kubernetes list API",
-		}), nil
 	case "DaemonSets":
-		daemonSets, response, err := fetchKubernetesListItems[daemonSetListItem](ctx, client, args.ProjectID, "daemonset", args.Limit, args.Offset, args.SearchTerm)
+		daemonSets, response, err := fetchKubernetesListItems[daemonSetListItem](ctx, client, args.ProjectID, spec.resourcePath, args.Limit, args.Offset, args.SearchTerm)
 		if err != nil {
 			return listKubernetesError("DaemonSets", response, err), nil
 		}
@@ -1022,12 +1189,8 @@ func listKubernetesResources(client *taikungoclient.Client, args ListKubernetesR
 			})
 		}
 		result = summaries
-	case "Jobs":
-		return createJSONResponse(ErrorResponse{
-			Error: "Jobs listing is not available through the Cloudera Cloud Factory Kubernetes list API",
-		}), nil
 	case "Nodes":
-		nodes, response, err := fetchKubernetesListItems[nodeListItem](ctx, client, args.ProjectID, "nodes", args.Limit, args.Offset, args.SearchTerm)
+		nodes, response, err := fetchKubernetesListItems[nodeListItem](ctx, client, args.ProjectID, spec.resourcePath, args.Limit, args.Offset, args.SearchTerm)
 		if err != nil {
 			return listKubernetesError("Nodes", response, err), nil
 		}
@@ -1046,7 +1209,7 @@ func listKubernetesResources(client *taikungoclient.Client, args ListKubernetesR
 		}
 		result = summaries
 	case "Pvcs":
-		pvcs, response, err := fetchKubernetesListItems[pvcListItem](ctx, client, args.ProjectID, "pvc", args.Limit, args.Offset, args.SearchTerm)
+		pvcs, response, err := fetchKubernetesListItems[pvcListItem](ctx, client, args.ProjectID, spec.resourcePath, args.Limit, args.Offset, args.SearchTerm)
 		if err != nil {
 			return listKubernetesError("Pvcs", response, err), nil
 		}
@@ -1064,12 +1227,8 @@ func listKubernetesResources(client *taikungoclient.Client, args ListKubernetesR
 			})
 		}
 		result = summaries
-	case "StorageClasses":
-		return createJSONResponse(ErrorResponse{
-			Error: "StorageClasses listing is not available through the Cloudera Cloud Factory Kubernetes list API",
-		}), nil
 	case "Sts":
-		statefulSets, response, err := fetchKubernetesListItems[statefulSetListItem](ctx, client, args.ProjectID, "sts", args.Limit, args.Offset, args.SearchTerm)
+		statefulSets, response, err := fetchKubernetesListItems[statefulSetListItem](ctx, client, args.ProjectID, spec.resourcePath, args.Limit, args.Offset, args.SearchTerm)
 		if err != nil {
 			return listKubernetesError("Sts", response, err), nil
 		}
@@ -1086,9 +1245,7 @@ func listKubernetesResources(client *taikungoclient.Client, args ListKubernetesR
 		}
 		result = summaries
 	default:
-		return createJSONResponse(ErrorResponse{
-			Error: fmt.Sprintf("Unsupported resource kind: %s", args.Kind),
-		}), nil
+		return invalidKubernetesKindResponse(args.Kind, "list-kubernetes-resources", kubernetesRecognizedListKinds()), nil
 	}
 
 	return createJSONResponse(result), nil
@@ -1097,12 +1254,12 @@ func listKubernetesResources(client *taikungoclient.Client, args ListKubernetesR
 func describeKubernetesResource(client *taikungoclient.Client, args DescribeKubernetesResourceArgs) (*mcp_golang.ToolResponse, error) {
 	ctx := context.Background()
 
-	kind, err := taikuncore.NewEKubernetesResourceFromValue(args.Kind)
-	if err != nil {
-		return createJSONResponse(ErrorResponse{Error: fmt.Sprintf("Invalid resource kind: %s", args.Kind)}), nil
+	kind, ok := normalizeOperationKubernetesKind(args.Kind)
+	if !ok {
+		return invalidKubernetesKindResponse(args.Kind, "describe-kubernetes-resource", kubernetesOperationKindStrings()), nil
 	}
 
-	describeCmd := taikuncore.NewDescribeKubernetesResourceCommand(args.ProjectID, args.Name, *kind)
+	describeCmd := taikuncore.NewDescribeKubernetesResourceCommand(args.ProjectID, args.Name, kind)
 	if args.Namespace != "" {
 		describeCmd.SetNamespace(args.Namespace)
 	}
@@ -1115,7 +1272,7 @@ func describeKubernetesResource(client *taikungoclient.Client, args DescribeKube
 		return createError(httpResponse, err), nil
 	}
 
-	if errorResp := checkResponse(httpResponse, fmt.Sprintf("describe %s %s", args.Kind, args.Name)); errorResp != nil {
+	if errorResp := checkResponse(httpResponse, fmt.Sprintf("describe %s %s", kind, args.Name)); errorResp != nil {
 		return errorResp, nil
 	}
 
@@ -1133,11 +1290,9 @@ func describeKubernetesResource(client *taikungoclient.Client, args DescribeKube
 func deleteKubernetesResource(client *taikungoclient.Client, args DeleteKubernetesResourceArgs) (*mcp_golang.ToolResponse, error) {
 	ctx := context.Background()
 
-	kind, err := taikuncore.NewEKubernetesResourceFromValue(args.Kind)
-	if err != nil {
-		return createJSONResponse(ErrorResponse{
-			Error: fmt.Sprintf("Invalid resource kind: %s", args.Kind),
-		}), nil
+	kind, ok := normalizeOperationKubernetesKind(args.Kind)
+	if !ok {
+		return invalidKubernetesKindResponse(args.Kind, "delete-kubernetes-resource", kubernetesOperationKindStrings()), nil
 	}
 
 	// Create the action request with name and namespace
@@ -1147,7 +1302,7 @@ func deleteKubernetesResource(client *taikungoclient.Client, args DeleteKubernet
 	}
 
 	// Create the delete command
-	deleteCmd := taikuncore.NewDeleteKubernetesResourceCommand(args.ProjectID, *kind, []taikuncore.KubernetesActionRequest{*actionRequest})
+	deleteCmd := taikuncore.NewDeleteKubernetesResourceCommand(args.ProjectID, kind, []taikuncore.KubernetesActionRequest{*actionRequest})
 
 	_, httpResponse, err := client.Client.KubernetesAPI.KubernetesDeleteResource(ctx).
 		DeleteKubernetesResourceCommand(*deleteCmd).
@@ -1157,7 +1312,7 @@ func deleteKubernetesResource(client *taikungoclient.Client, args DeleteKubernet
 		return createError(httpResponse, err), nil
 	}
 
-	if errorResp := checkResponse(httpResponse, fmt.Sprintf("delete %s %s", args.Kind, args.Name)); errorResp != nil {
+	if errorResp := checkResponse(httpResponse, fmt.Sprintf("delete %s %s", kind, args.Name)); errorResp != nil {
 		return errorResp, nil
 	}
 
@@ -1167,7 +1322,7 @@ func deleteKubernetesResource(client *taikungoclient.Client, args DeleteKubernet
 	}
 
 	successResp := SuccessResponse{
-		Message: fmt.Sprintf("%s '%s' deleted successfully from namespace '%s'", args.Kind, args.Name, namespace),
+		Message: fmt.Sprintf("%s '%s' deleted successfully from namespace '%s'", kind, args.Name, namespace),
 		Success: true,
 	}
 
