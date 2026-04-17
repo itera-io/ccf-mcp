@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strings"
 
 	"github.com/itera-io/taikungoclient"
 	taikuncore "github.com/itera-io/taikungoclient/client"
@@ -372,6 +373,106 @@ func addAppToCatalogWithParameters(client *taikungoclient.Client, args AddAppToC
 	}
 
 	return createJSONResponse(successResp), nil
+}
+
+func resolveCatalogAppForRemoval(applications []CatalogAppSummary, args RemoveAppFromCatalogArgs) (CatalogAppSummary, error) {
+	matches := make([]CatalogAppSummary, 0)
+	packageName := strings.TrimSpace(args.PackageName)
+	repository := strings.TrimSpace(args.Repository)
+
+	for _, app := range applications {
+		if app.CatalogID != args.CatalogID {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(app.Name), packageName) {
+			continue
+		}
+		if repository != "" && !strings.EqualFold(strings.TrimSpace(app.Repository), repository) {
+			continue
+		}
+		matches = append(matches, app)
+	}
+
+	switch len(matches) {
+	case 0:
+		if repository != "" {
+			return CatalogAppSummary{}, fmt.Errorf("application '%s' from repository '%s' was not found in catalog ID %d", args.PackageName, args.Repository, args.CatalogID)
+		}
+		return CatalogAppSummary{}, fmt.Errorf("application '%s' was not found in catalog ID %d", args.PackageName, args.CatalogID)
+	case 1:
+		return matches[0], nil
+	default:
+		repositories := make([]string, 0, len(matches))
+		for _, app := range matches {
+			if app.Repository != "" {
+				repositories = append(repositories, app.Repository)
+			}
+		}
+		if len(repositories) == 0 {
+			return CatalogAppSummary{}, fmt.Errorf("multiple catalog applications matched '%s' in catalog ID %d; specify repository to disambiguate", args.PackageName, args.CatalogID)
+		}
+		sort.Strings(repositories)
+		return CatalogAppSummary{}, fmt.Errorf("multiple catalog applications matched '%s' in catalog ID %d; specify repository. Matching repositories: %s", args.PackageName, args.CatalogID, strings.Join(repositories, ", "))
+	}
+}
+
+func removeAppFromCatalog(client *taikungoclient.Client, args RemoveAppFromCatalogArgs) (*mcp_golang.ToolResponse, error) {
+	ctx := context.Background()
+
+	catalogApps, response, err := client.Client.CatalogAppAPI.CatalogAppList(ctx).
+		CatalogId(args.CatalogID).
+		Search(args.PackageName).
+		Limit(100).
+		Execute()
+	if err != nil {
+		return createError(response, err), nil
+	}
+	if errorResp := checkResponse(response, "list catalog applications for removal"); errorResp != nil {
+		return errorResp, nil
+	}
+
+	applications := make([]CatalogAppSummary, 0)
+	if catalogApps != nil {
+		for _, app := range catalogApps.Data {
+			summary := CatalogAppSummary{}
+			if app.CatalogAppId != nil {
+				summary.ID = *app.CatalogAppId
+			}
+			summary.Name = app.GetName()
+			if app.RepoName.IsSet() && app.RepoName.Get() != nil {
+				summary.Repository = *app.RepoName.Get()
+			}
+			if app.CatalogId != nil {
+				summary.CatalogID = *app.CatalogId
+			}
+			if app.CatalogName.IsSet() && app.CatalogName.Get() != nil {
+				summary.CatalogName = *app.CatalogName.Get()
+			}
+			applications = append(applications, summary)
+		}
+	}
+
+	matchedApp, matchErr := resolveCatalogAppForRemoval(applications, args)
+	if matchErr != nil {
+		return createJSONResponse(ErrorResponse{Error: matchErr.Error()}), nil
+	}
+
+	deleteResponse, err := client.Client.CatalogAppAPI.CatalogAppDelete(ctx, matchedApp.ID).Execute()
+	if err != nil {
+		return createError(deleteResponse, err), nil
+	}
+	if errorResp := checkResponse(deleteResponse, "remove application from catalog"); errorResp != nil {
+		return errorResp, nil
+	}
+
+	message := fmt.Sprintf("Application '%s' removed from catalog ID %d", matchedApp.Name, args.CatalogID)
+	if matchedApp.Repository != "" {
+		message = fmt.Sprintf("Application '%s' from repository '%s' removed from catalog ID %d", matchedApp.Name, matchedApp.Repository, args.CatalogID)
+	}
+	return createJSONResponse(SuccessResponse{
+		Message: message,
+		Success: true,
+	}), nil
 }
 
 func listCatalogApps(client *taikungoclient.Client, args ListCatalogAppsArgs) (*mcp_golang.ToolResponse, error) {

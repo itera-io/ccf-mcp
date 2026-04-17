@@ -702,6 +702,14 @@ func main() {
 	}
 	logger.Println("Registered catalog-app-add tool")
 
+	err = registerScopedTool(server, "catalog-app-remove", "Remove an application from a catalog by package name and optional repository", func(args RemoveAppFromCatalogArgs) (*mcp_golang.ToolResponse, error) {
+		return removeAppFromCatalog(taikunClient, args)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register catalog-app-remove tool: %v", err)
+	}
+	logger.Println("Registered catalog-app-remove tool")
+
 	err = registerScopedTool(server, "catalog-apps-list", "List applications in a specific catalog or all catalogs", func(args ListCatalogAppsArgs) (*mcp_golang.ToolResponse, error) {
 		return listCatalogApps(taikunClient, args)
 	})

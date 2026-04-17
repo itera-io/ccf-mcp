@@ -74,6 +74,7 @@ var toolRequiredScopes = map[string][]string{
 	"delete-repository":              {"scope:applications:write"},
 	"update-repository-password":     {"scope:applications:write"},
 	"catalog-app-add":                {"scope:applications:write"},
+	"catalog-app-remove":             {"scope:applications:write"},
 	"catalog-apps-list":              {"scope:applications:read"},
 	"catalog-app-params":             {"scope:applications:read"},
 	"catalog-app-defaults-set":       {"scope:applications:write"},
