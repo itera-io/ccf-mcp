@@ -451,6 +451,65 @@ func TestArgumentStructs(t *testing.T) {
 			},
 		},
 		{
+			name: "ProjectMonitoringAlertsArgs",
+			data: ProjectMonitoringAlertsArgs{
+				ProjectID: 123,
+			},
+		},
+		{
+			name: "ProjectAlertsArgs",
+			data: ProjectAlertsArgs{
+				ProjectID: 123,
+				Mode:      "K8S",
+			},
+		},
+		{
+			name: "QueryProjectLokiLogsArgs",
+			data: QueryProjectLokiLogsArgs{
+				ProjectID:  123,
+				Parameters: `{app="nginx"}`,
+				Filters: []LokiLogFilterArgs{
+					{
+						Operator: "=",
+						Value:    "nginx",
+					},
+				},
+				StartDate: "2026-04-16T12:00:00Z",
+				EndDate:   "2026-04-16T13:00:00Z",
+				Limit:     100,
+				Direction: "backward",
+			},
+		},
+		{
+			name: "ExportProjectLokiLogsArgs",
+			data: ExportProjectLokiLogsArgs{
+				ProjectID:  123,
+				Parameters: `{app="nginx"}`,
+				Limit:      100,
+				Direction:  "forward",
+			},
+		},
+		{
+			name: "QueryProjectPrometheusMetricsArgs",
+			data: QueryProjectPrometheusMetricsArgs{
+				ProjectID:  123,
+				Parameters: `sum(rate(container_cpu_usage_seconds_total[5m]))`,
+				Start:      "2026-04-16T12:00:00Z",
+				End:        "2026-04-16T13:00:00Z",
+				Step:       "30s",
+				IsGraphEnabled: func() *bool {
+					v := true
+					return &v
+				}(),
+			},
+		},
+		{
+			name: "ProjectPrometheusMetricsAutocompleteArgs",
+			data: ProjectPrometheusMetricsAutocompleteArgs{
+				ProjectID: 123,
+			},
+		},
+		{
 			name: "ProjectBackupCredentialArgs",
 			data: ProjectBackupCredentialArgs{
 				ProjectID:          123,

@@ -1238,6 +1238,24 @@ func main() {
 	mustRegisterScopedTool(server, "disable-project-monitoring", "Disable monitoring for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
 		return disableProjectMonitoring(taikunClient, args)
 	})
+	mustRegisterScopedTool(server, "get-project-monitoring-alerts", "Read Prometheus-style monitoring alerts for a project. Monitoring must be enabled on the project first.", func(args ProjectMonitoringAlertsArgs) (*mcp_golang.ToolResponse, error) {
+		return getProjectMonitoringAlerts(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "list-project-alerts", "Read project detail alerts/messages for a project. Monitoring must be enabled on the project first.", func(args ProjectAlertsArgs) (*mcp_golang.ToolResponse, error) {
+		return listProjectAlerts(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "query-project-loki-logs", "Query Loki logs for a project. Monitoring must be enabled and results can be large.", func(args QueryProjectLokiLogsArgs) (*mcp_golang.ToolResponse, error) {
+		return queryProjectLokiLogs(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "export-project-loki-logs", "Export Loki logs for a project. Monitoring must be enabled; returns the API CSV export payload.", func(args ExportProjectLokiLogsArgs) (*mcp_golang.ToolResponse, error) {
+		return exportProjectLokiLogs(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "query-project-prometheus-metrics", "Query Prometheus metrics for a project. Monitoring must be enabled and the result payload may be large.", func(args QueryProjectPrometheusMetricsArgs) (*mcp_golang.ToolResponse, error) {
+		return queryProjectPrometheusMetrics(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "autocomplete-project-metrics", "Return Prometheus metric autocomplete suggestions for a project. Monitoring must be enabled.", func(args ProjectPrometheusMetricsAutocompleteArgs) (*mcp_golang.ToolResponse, error) {
+		return autocompleteProjectPrometheusMetrics(taikunClient, args)
+	})
 	mustRegisterScopedTool(server, "enable-project-ai-assistant", "Enable AI Assistant for a project using an AI credential", func(args ProjectAICredentialArgs) (*mcp_golang.ToolResponse, error) {
 		return enableProjectAIAssistant(taikunClient, args)
 	})
