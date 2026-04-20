@@ -16,6 +16,7 @@ import (
 
 const (
 	defaultInstallAppTimeoutSeconds = 600
+	defaultInstallAppTTLMinutes     = 10
 	installAppTimeoutHint           = "Larger applications may need a longer install timeout; set timeout explicitly when installs routinely take more than 10 minutes."
 )
 
@@ -33,6 +34,7 @@ type InstallAppArgs struct {
 	AutoSync                  bool           `json:"autoSync,omitempty" jsonschema:"description=Enable automatic synchronization (default: false)"`
 	TaikunLinkEnabled         bool           `json:"taikunLinkEnabled,omitempty" jsonschema:"description=Enable Cloudera Cloud Factory (Taikun) link integration (default: false)"`
 	Timeout                   int32          `json:"timeout,omitempty" jsonschema:"description=Installation timeout in seconds (default: 600). Larger applications may need a bigger timeout."`
+	TTL                       int32          `json:"ttl,omitempty" jsonschema:"description=Application TTL in minutes (default: 10, valid range: 10-200)"`
 	Parameters                []AppParameter `json:"parameters,omitempty" jsonschema:"description=Application parameters as key-value pairs (optional)"`
 	UseCatalogDefaults        *bool          `json:"useCatalogDefaults,omitempty" jsonschema:"description=Use catalog default parameters as a base (default: true)"`
 	WaitForReady              bool           `json:"waitForReady,omitempty" jsonschema:"description=Wait for application to be ready before returning (default: false)"`
@@ -194,9 +196,25 @@ func resolveInstallAppTimeout(timeout int32) (int32, bool) {
 	return defaultInstallAppTimeoutSeconds, true
 }
 
+func resolveInstallAppTTL(ttl int32) (int32, bool, string) {
+	if ttl == 0 {
+		return defaultInstallAppTTLMinutes, true, ""
+	}
+	if ttl < 10 || ttl > 200 {
+		return 0, false, "ttl must be between 10 and 200 minutes"
+	}
+	return ttl, false, ""
+}
+
 func installApp(client *taikungoclient.Client, args InstallAppArgs) (*mcp_golang.ToolResponse, error) {
 	ctx := context.Background()
 	installTimeout, timeoutDefaulted := resolveInstallAppTimeout(args.Timeout)
+	installTTL, ttlDefaulted, ttlValidationError := resolveInstallAppTTL(args.TTL)
+	if ttlValidationError != "" {
+		return createJSONResponse(ErrorResponse{
+			Error: ttlValidationError,
+		}), nil
+	}
 
 	createCmd := taikuncore.NewCreateProjectAppCommand()
 	createCmd.SetName(args.Name)
@@ -206,6 +224,10 @@ func installApp(client *taikungoclient.Client, args InstallAppArgs) (*mcp_golang
 	createCmd.SetAutoSync(args.AutoSync)
 	createCmd.SetTaikunLinkEnabled(args.TaikunLinkEnabled)
 	createCmd.SetTimeout(installTimeout)
+	if createCmd.AdditionalProperties == nil {
+		createCmd.AdditionalProperties = map[string]interface{}{}
+	}
+	createCmd.AdditionalProperties["ttl"] = installTTL
 
 	if args.ExtraValues != "" {
 		createCmd.SetExtraValues(args.ExtraValues)
@@ -368,6 +390,8 @@ func installApp(client *taikungoclient.Client, args InstallAppArgs) (*mcp_golang
 		Status             string         `json:"status"`
 		TimeoutSeconds     int32          `json:"timeoutSeconds"`
 		TimeoutDefaulted   bool           `json:"timeoutDefaulted"`
+		TTLMinutes         int32          `json:"ttlMinutes"`
+		TTLDefaulted       bool           `json:"ttlDefaulted"`
 		Hint               string         `json:"hint,omitempty"`
 		UseCatalogDefaults bool           `json:"useCatalogDefaults"`
 		ParametersApplied  []AppParameter `json:"parametersApplied,omitempty"`
@@ -397,6 +421,8 @@ func installApp(client *taikungoclient.Client, args InstallAppArgs) (*mcp_golang
 		Status:             "initiated",
 		TimeoutSeconds:     installTimeout,
 		TimeoutDefaulted:   timeoutDefaulted,
+		TTLMinutes:         installTTL,
+		TTLDefaulted:       ttlDefaulted,
 		UseCatalogDefaults: useCatalogDefaults,
 		ParametersApplied:  appliedParams,
 	}
