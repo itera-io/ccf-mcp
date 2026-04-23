@@ -152,6 +152,25 @@ Runtime logs are written to:
 
 Any MCP client that can launch a stdio server can use the same binary and environment variables.
 
+### Claude Code — suppressing permission prompts
+
+By default, Claude Code asks for approval before running each MCP tool call. To allow tools from this server without prompting, add them to the `permissions.allow` list in `.claude/settings.local.json` at the root of your working directory.
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "mcp__cloudera-cloud-factory__.*"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "cloudera-cloud-factory"
+  ]
+}
+```
+
+The permission key format is `mcp__<server-name>__<tool-name>`. The value is matched as a regular expression, so `mcp__cloudera-cloud-factory__.*` allows all tools from this server at once.
+
 ## Tool coverage
 
 The server currently exposes tooling across these areas:
