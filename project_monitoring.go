@@ -194,7 +194,8 @@ func validatePromQLExpression(parameters string) *mcp_golang.ToolResponse {
 			Error: "parameters is required for Prometheus metrics queries",
 		})
 	}
-	if _, err := promqlparser.ParseExpr(trimmed); err != nil {
+	parser := promqlparser.NewParser(promqlparser.Options{})
+	if _, err := parser.ParseExpr(trimmed); err != nil {
 		return createJSONResponse(ErrorResponse{
 			Error:   fmt.Sprintf("Invalid PromQL query: %s", err),
 			Details: "parameters must be a valid PromQL expression.",

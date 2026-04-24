@@ -12,6 +12,8 @@ require (
 	k8s.io/client-go v0.35.4
 )
 
+replace github.com/hashicorp/memberlist => github.com/grafana/memberlist v0.3.1-0.20251126142931-6f9f62ab6f86
+
 require (
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
