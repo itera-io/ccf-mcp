@@ -183,6 +183,14 @@ func TestArgumentStructs(t *testing.T) {
 			},
 		},
 		{
+			name: "UpdateAppAutoSyncArgs",
+			data: UpdateAppAutoSyncArgs{
+				ProjectAppID: 123,
+				Mode:         "Minutes",
+				TTL:          60,
+			},
+		},
+		{
 			name: "ListProjectsArgs",
 			data: ListProjectsArgs{
 				Limit:               10,

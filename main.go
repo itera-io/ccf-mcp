@@ -758,6 +758,14 @@ func main() {
 	}
 	logger.Println("Registered get-app tool")
 
+	err = registerScopedTool(server, "update-app-autosync", "Update application autosync configuration", func(args UpdateAppAutoSyncArgs) (*mcp_golang.ToolResponse, error) {
+		return updateAppAutoSync(taikunClient, args)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register update-app-autosync tool: %v", err)
+	}
+	logger.Println("Registered update-app-autosync tool")
+
 	err = registerScopedTool(server, "update-sync-app", "Update application values and sync", func(args UpdateSyncAppArgs) (*mcp_golang.ToolResponse, error) {
 		return updateSyncApp(taikunClient, args)
 	})

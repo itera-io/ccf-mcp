@@ -33,7 +33,7 @@ type InstallAppArgs struct {
 	ExtraValues               string         `json:"extraValues,omitempty" jsonschema:"description=Base64-encoded YAML extra values for the application (optional)"`
 	AutoSync                  bool           `json:"autoSync,omitempty" jsonschema:"description=Enable automatic synchronization (default: false)"`
 	TaikunLinkEnabled         bool           `json:"taikunLinkEnabled,omitempty" jsonschema:"description=Enable Cloudera Cloud Factory (Taikun) link integration (default: false)"`
-	Timeout                   int32          `json:"timeout,omitempty" jsonschema:"description=Installation timeout in seconds (default: 600). Larger applications may need a bigger timeout."`
+	Timeout                   int32          `json:"timeout,omitempty" jsonschema:"description=Installation timeout in minutes (optional). Larger applications may need a bigger timeout."`
 	TTL                       int32          `json:"ttl,omitempty" jsonschema:"description=Application TTL in minutes (default: 10, valid range: 10-200)"`
 	Parameters                []AppParameter `json:"parameters,omitempty" jsonschema:"description=Application parameters as key-value pairs (optional)"`
 	UseCatalogDefaults        *bool          `json:"useCatalogDefaults,omitempty" jsonschema:"description=Use catalog default parameters as a base (default: true)"`
@@ -57,7 +57,7 @@ type GetAppArgs struct {
 type UpdateSyncAppArgs struct {
 	ProjectAppID int32  `json:"projectAppId" jsonschema:"required,description=The project application ID to update/sync"`
 	ExtraValues  string `json:"extraValues,omitempty" jsonschema:"description=Base64-encoded YAML extra values (optional - if not provided, will only sync)"`
-	Timeout      int32  `json:"timeout,omitempty" jsonschema:"description=Operation timeout in seconds (optional)"`
+	Timeout      int32  `json:"timeout,omitempty" jsonschema:"description=Operation timeout in minutes (optional)"`
 	SyncOnly     bool   `json:"syncOnly,omitempty" jsonschema:"description=If true, only sync without updating values (default: false)"`
 }
 
@@ -325,9 +325,9 @@ func installApp(client *taikungoclient.Client, args InstallAppArgs) (*mcp_golang
 				ctx := context.Background()
 				details, detailsResponse, detailsErr := client.Client.ProjectAppsAPI.ProjectappDetails(ctx, projectAppID).Execute()
 				if detailsErr == nil && details != nil && string(details.GetStatus()) == "Failed" {
-					logger.Printf("Application '%s' (ID: %d) failed, attempting one sync retry", args.Name, projectAppID)
-					syncErr := syncProjectApp(client, projectAppID, waitTimeout)
-					if syncErr == nil {
+						logger.Printf("Application '%s' (ID: %d) failed, attempting one sync retry", args.Name, projectAppID)
+						syncErr := syncProjectApp(client, projectAppID, waitTimeout)
+						if syncErr == nil {
 						retryWaitErr := waitForAppReady(client, projectAppID, waitTimeout, false, args.ReadyStabilizationSeconds)
 						if retryWaitErr == nil {
 							resultMsg = fmt.Sprintf("Application '%s' (ID: %d) installed successfully after sync retry in namespace '%s'", args.Name, projectAppID, args.Namespace)
@@ -600,6 +600,7 @@ func getApp(client *taikungoclient.Client, args GetAppArgs) (*mcp_golang.ToolRes
 		HelmResult        string         `json:"helmResult,omitempty"`
 		Logs              string         `json:"logs,omitempty"`
 		ReleaseNotes      string         `json:"releaseNotes,omitempty"`
+		TTL               int32          `json:"ttl"`
 	}
 
 	appDetail := AppDetails{
@@ -654,6 +655,8 @@ func getApp(client *taikungoclient.Client, args GetAppArgs) (*mcp_golang.ToolRes
 	if appDetails.GetReleaseNotes() != "" {
 		appDetail.ReleaseNotes = appDetails.GetReleaseNotes()
 	}
+
+	appDetail.TTL = appDetails.GetTtl()
 
 	return createJSONResponse(appDetail), nil
 }
@@ -822,4 +825,41 @@ func waitForApp(client *taikungoclient.Client, args WaitForAppArgs) (*mcp_golang
 		Message: message,
 		Success: true,
 	}), nil
+}
+
+type UpdateAppAutoSyncArgs struct {
+	ProjectAppID int32  `json:"projectAppId" jsonschema:"required,description=The project application ID to update autosync for"`
+	Mode         string `json:"mode,omitempty" jsonschema:"description=The TTL mode (e.g., 'Seconds', 'Minutes', 'Hours')"`
+	TTL          int32  `json:"ttl,omitempty" jsonschema:"description=The TTL value"`
+}
+
+func updateAppAutoSync(client *taikungoclient.Client, args UpdateAppAutoSyncArgs) (*mcp_golang.ToolResponse, error) {
+	ctx := context.Background()
+
+	cmd := taikuncore.NewAutoSyncManagementCommand()
+	cmd.SetId(args.ProjectAppID)
+	if args.Mode != "" {
+		cmd.SetMode(args.Mode)
+	}
+	if args.TTL > 0 {
+		cmd.SetTtl(args.TTL)
+	}
+
+	httpResponse, err := client.Client.ProjectAppsAPI.ProjectappAutosync(ctx).
+		AutoSyncManagementCommand(*cmd).
+		Execute()
+
+	if err != nil {
+		return createError(httpResponse, err), nil
+	}
+
+	if errorResp := checkResponse(httpResponse, "update application autosync"); errorResp != nil {
+		return errorResp, nil
+	}
+
+	successResp := SuccessResponse{
+		Message: fmt.Sprintf("Application ID %d autosync configuration updated successfully", args.ProjectAppID),
+		Success: true,
+	}
+	return createJSONResponse(successResp), nil
 }
