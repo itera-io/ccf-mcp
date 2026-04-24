@@ -81,6 +81,7 @@ var toolRequiredScopes = map[string][]string{
 	"app-install":                    {"scope:applications:write"},
 	"list-apps":                      {"scope:applications:read"},
 	"get-app":                        {"scope:applications:read"},
+	"update-app-autosync":            {"scope:applications:write"},
 	"update-sync-app":                {"scope:applications:write"},
 	"uninstall-app":                  {"scope:applications:write"},
 	"wait-for-app":                   {"scope:applications:read"},
