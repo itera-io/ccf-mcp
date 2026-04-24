@@ -910,7 +910,7 @@ func main() {
 	}
 	logger.Println("Registered bind-flavors-to-project tool")
 
-	err = registerScopedTool(server, "add-server-to-project", "Add a server to a project. Recommendation: Bastion needs min flavor (2 CPUs, 2GB RAM), Master and Worker need at least 4 CPUs and 4GB RAM.", func(args AddServerArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "add-server-to-project", "Add a Kubernetes server to a project. Recommendation: Bastion can use 2 CPUs / 2GB RAM; Kubemaster must be at least 4 CPUs / 4GB RAM; if monitoring is enabled, include at least one Kubeworker with 4 CPUs / 4GB RAM before commit-project.", func(args AddServerArgs) (*mcp_golang.ToolResponse, error) {
 		return addServerToProject(taikunClient, args)
 	})
 	if err != nil {
@@ -918,7 +918,7 @@ func main() {
 	}
 	logger.Println("Registered add-server-to-project tool")
 
-	err = registerScopedTool(server, "commit-project", "Commit and provision pending project infrastructure in the cloud. For VM-only changes, this tool automatically falls back to the VM commit endpoint used by the UI when the cluster-style commit path is not applicable. Do not call while project status is Updating; full initial Kubernetes deploy often takes 10-30 minutes.", func(args CommitProjectArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "commit-project", "Commit and provision pending project infrastructure in the cloud. For Kubernetes changes, commit-project validates that all Kubemaster nodes are at least 4 CPUs / 4GB RAM and requires at least one Kubeworker at 4 CPUs / 4GB RAM when monitoring is enabled. For VM-only changes, this tool automatically falls back to the VM commit endpoint used by the UI when the cluster-style commit path is not applicable. Do not call while project status is Updating; full initial Kubernetes deploy often takes 10-30 minutes.", func(args CommitProjectArgs) (*mcp_golang.ToolResponse, error) {
 		return commitProject(taikunClient, args)
 	})
 	if err != nil {

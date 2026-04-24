@@ -32,6 +32,9 @@ const (
 	projectCommitModeAuto    projectCommitMode = "auto"
 	projectCommitModeProject projectCommitMode = "project"
 	projectCommitModeVM      projectCommitMode = "vm"
+
+	minCommitSizingCPU int32   = 4
+	minCommitSizingRAM float64 = 4
 )
 
 func getProjectServerAddLock(projectId int32) *sync.Mutex {
@@ -296,6 +299,11 @@ type projectCommitResult struct {
 
 func commitProjectWithFallback(client *taikungoclient.Client, projectID int32) (projectCommitResult, *apiErrorInfo) {
 	mode := pendingProjectCommitMode(projectID)
+	if mode != projectCommitModeVM {
+		if errorInfo := validateProjectSizingForCommit(client, projectID); errorInfo != nil {
+			return projectCommitResult{}, errorInfo
+		}
+	}
 
 	return executeProjectCommitMode(
 		projectID,
@@ -310,6 +318,106 @@ func commitProjectWithFallback(client *taikungoclient.Client, projectID int32) (
 			return commitProjectVMChanges(client, projectID)
 		},
 	)
+}
+
+func validateProjectSizingForCommit(client *taikungoclient.Client, projectID int32) *apiErrorInfo {
+	ctx := context.Background()
+
+	serversResult, serversResponse, err := client.Client.ServersAPI.ServersDetails(ctx, projectID).Execute()
+	if err != nil {
+		errorInfo := apiErrorInfoFromResponse(serversResponse, err)
+		return &errorInfo
+	}
+	if serversResponse == nil || serversResponse.StatusCode < http.StatusOK || serversResponse.StatusCode >= http.StatusMultipleChoices {
+		errorInfo := apiErrorInfoFromResponse(serversResponse, fmt.Errorf("failed to load project %d servers for commit sizing validation", projectID))
+		return &errorInfo
+	}
+	if serversResult == nil {
+		return &apiErrorInfo{
+			Message: fmt.Sprintf("Unable to validate project %d sizing because no server details were returned", projectID),
+		}
+	}
+
+	projectDetails := serversResult.GetProject()
+	cloudID := projectDetails.GetCloudId()
+	if cloudID <= 0 {
+		return &apiErrorInfo{
+			Message: fmt.Sprintf("Unable to validate project %d sizing because cloud metadata is missing", projectID),
+		}
+	}
+
+	flavorsResult, flavorsResponse, err := client.Client.CloudCredentialAPI.CloudcredentialsAllFlavors(ctx, cloudID).Execute()
+	if err != nil {
+		errorInfo := apiErrorInfoFromResponse(flavorsResponse, err)
+		return &errorInfo
+	}
+	if flavorsResponse == nil || flavorsResponse.StatusCode < http.StatusOK || flavorsResponse.StatusCode >= http.StatusMultipleChoices {
+		errorInfo := apiErrorInfoFromResponse(flavorsResponse, fmt.Errorf("failed to load flavors for cloud credential %d while validating project %d", cloudID, projectID))
+		return &errorInfo
+	}
+
+	flavorByName := map[string]FlavorSummary{}
+	if flavorsResult != nil {
+		for _, flavor := range flavorsResult.GetData() {
+			name := strings.ToLower(strings.TrimSpace(flavor.GetName()))
+			if name == "" {
+				continue
+			}
+			flavorByName[name] = FlavorSummary{
+				Name: flavor.GetName(),
+				CPU:  flavor.GetCpu(),
+				RAM:  flavor.GetRam(),
+			}
+		}
+	}
+
+	workerCount := 0
+	qualifyingWorkerCount := 0
+	for _, server := range serversResult.GetData() {
+		role := strings.ToLower(strings.TrimSpace(string(server.GetRole())))
+		if role != "kubemaster" && role != "kubeworker" {
+			continue
+		}
+
+		flavorName := strings.TrimSpace(server.GetFlavor())
+		normalizedFlavorName := strings.ToLower(flavorName)
+		flavor, ok := flavorByName[normalizedFlavorName]
+		if !ok {
+			return &apiErrorInfo{
+				Message: fmt.Sprintf("Cannot validate sizing for server %q (%s) because flavor %q is missing from cloud credential %d metadata", server.GetName(), server.GetRole(), flavorName, cloudID),
+			}
+		}
+
+		if role == "kubemaster" && !flavorMeetsMinimum(flavor, minCommitSizingCPU, minCommitSizingRAM) {
+			return &apiErrorInfo{
+				Message: fmt.Sprintf("commit-project requires every Kubemaster to use at least %d CPU / %.0f GB RAM; server %q uses flavor %q (%d CPU / %.1f GB RAM)", minCommitSizingCPU, minCommitSizingRAM, server.GetName(), flavor.Name, flavor.CPU, flavor.RAM),
+			}
+		}
+
+		if role == "kubeworker" {
+			workerCount++
+			if flavorMeetsMinimum(flavor, minCommitSizingCPU, minCommitSizingRAM) {
+				qualifyingWorkerCount++
+			}
+		}
+	}
+
+	if projectDetails.GetIsMonitoringEnabled() && qualifyingWorkerCount == 0 {
+		if workerCount == 0 {
+			return &apiErrorInfo{
+				Message: fmt.Sprintf("commit-project requires at least one Kubeworker with %d CPU / %.0f GB RAM when monitoring is enabled for project %d", minCommitSizingCPU, minCommitSizingRAM, projectID),
+			}
+		}
+		return &apiErrorInfo{
+			Message: fmt.Sprintf("commit-project requires at least one Kubeworker with %d CPU / %.0f GB RAM when monitoring is enabled for project %d; none of the %d worker nodes meet this minimum", minCommitSizingCPU, minCommitSizingRAM, projectID, workerCount),
+		}
+	}
+
+	return nil
+}
+
+func flavorMeetsMinimum(flavor FlavorSummary, minCPU int32, minRAM float64) bool {
+	return flavor.CPU >= minCPU && flavor.RAM >= minRAM
 }
 
 func commitProjectChanges(client *taikungoclient.Client, projectID int32) (projectCommitResult, *apiErrorInfo) {

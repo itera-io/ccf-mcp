@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -227,14 +228,28 @@ func TestCommitProjectWithFallbackPreservesReactiveFallbackInTrackedProjectMode(
 	projectID := int32(108)
 	recordPendingServerAdd(projectID)
 
+	serversBody := mustMarshalJSONForDeploy(t, buildServersListForDetails(projectID, 77, false, []taikuncore.ServerListDto{
+		buildServer(taikuncore.CLOUDROLE_KUBEMASTER, "master-1", "m4"),
+	}))
+	flavorsBody := mustMarshalJSONForDeploy(t, buildAllFlavorsList([]taikuncore.FlavorsListDto{
+		buildFlavor("m4", 4, 4),
+	}))
+
 	callCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
+		w.Header().Set("Content-Type", "application/json")
 		switch callCount {
 		case 1:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(serversBody))
+		case 2:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(flavorsBody))
+		case 3:
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte(`{"title":"Bad request","detail":"You need at least one worker, an odd number of master(s) and one bastion to commit changes."}`))
-		case 2:
+		case 4:
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{}`))
 		default:
@@ -257,10 +272,277 @@ func TestCommitProjectWithFallbackPreservesReactiveFallbackInTrackedProjectMode(
 	if result.Mode != "vm" {
 		t.Fatalf("expected VM commit result after fallback, got %q", result.Mode)
 	}
-	if callCount != 2 {
-		t.Fatalf("expected project commit plus VM fallback, got %d request(s)", callCount)
+	if callCount != 4 {
+		t.Fatalf("expected preflight, commit, and VM fallback calls, got %d request(s)", callCount)
 	}
 	if got := pendingProjectCommitMode(projectID); got != projectCommitModeAuto {
 		t.Fatalf("expected pending state to clear after successful fallback, got %q", got)
+	}
+}
+
+type queuedHTTPResponse struct {
+	statusCode int
+	body       string
+}
+
+func newQueuedResponseClient(t *testing.T, responses []queuedHTTPResponse) (*taikungoclient.Client, *int, func()) {
+	t.Helper()
+
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if callCount >= len(responses) {
+			t.Fatalf("unexpected request %d to %s", callCount+1, r.URL.Path)
+		}
+
+		next := responses[callCount]
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(next.statusCode)
+		_, _ = w.Write([]byte(next.body))
+	}))
+
+	cfg := taikuncore.NewConfiguration()
+	cfg.Scheme = "http"
+	cfg.Host = strings.TrimPrefix(server.URL, "http://")
+	client := &taikungoclient.Client{
+		Client: taikuncore.NewAPIClient(cfg),
+	}
+
+	return client, &callCount, server.Close
+}
+
+func mustMarshalJSONForDeploy(t *testing.T, value interface{}) string {
+	t.Helper()
+
+	bytes, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("failed to marshal json: %v", err)
+	}
+	return string(bytes)
+}
+
+func buildServersListForDetails(projectID, cloudID int32, monitoringEnabled bool, servers []taikuncore.ServerListDto) taikuncore.ServersListForDetails {
+	project := taikuncore.ProjectDetailsForServersDto{
+		Id:                  projectID,
+		Name:                "project-under-test",
+		Status:              taikuncore.PROJECTSTATUS_READY,
+		Health:              taikuncore.PROJECTHEALTH_HEALTHY,
+		CloudType:           taikuncore.ECLOUDCREDENTIALTYPE_AWS,
+		ProxmoxStorage:      taikuncore.PROXMOXSTORAGE_NFS,
+		CloudId:             cloudID,
+		IsMonitoringEnabled: monitoringEnabled,
+	}
+
+	return taikuncore.ServersListForDetails{
+		Data:    servers,
+		Project: project,
+	}
+}
+
+func buildServer(role taikuncore.CloudRole, name, flavor string) taikuncore.ServerListDto {
+	flavorValue := taikuncore.NewNullableString(&flavor)
+	return taikuncore.ServerListDto{
+		Name:        name,
+		Role:        role,
+		CloudType:   taikuncore.CLOUDTYPE_AWS,
+		ProxmoxRole: taikuncore.PROXMOXROLE_NONE,
+		Flavor:      *flavorValue,
+	}
+}
+
+func buildFlavor(name string, cpu int32, ram float64) taikuncore.FlavorsListDto {
+	return taikuncore.FlavorsListDto{
+		Name:        name,
+		Cpu:         cpu,
+		Ram:         ram,
+		Description: "",
+	}
+}
+
+func buildAllFlavorsList(flavors []taikuncore.FlavorsListDto) taikuncore.AllFlavorsList {
+	return taikuncore.AllFlavorsList{
+		Data:       flavors,
+		TotalCount: int32(len(flavors)),
+	}
+}
+
+func TestValidateProjectSizingForCommit(t *testing.T) {
+	projectID := int32(500)
+	cloudID := int32(77)
+
+	tests := []struct {
+		name            string
+		monitoring      bool
+		servers         []taikuncore.ServerListDto
+		flavors         []taikuncore.FlavorsListDto
+		wantErrContains string
+	}{
+		{
+			name:       "valid master sizing passes",
+			monitoring: false,
+			servers: []taikuncore.ServerListDto{
+				buildServer(taikuncore.CLOUDROLE_KUBEMASTER, "master-1", "m4"),
+			},
+			flavors: []taikuncore.FlavorsListDto{
+				buildFlavor("m4", 4, 4),
+			},
+		},
+		{
+			name:       "undersized master fails",
+			monitoring: false,
+			servers: []taikuncore.ServerListDto{
+				buildServer(taikuncore.CLOUDROLE_KUBEMASTER, "master-small", "m2"),
+			},
+			flavors: []taikuncore.FlavorsListDto{
+				buildFlavor("m2", 2, 2),
+			},
+			wantErrContains: "every Kubemaster",
+		},
+		{
+			name:       "monitoring disabled no worker requirement",
+			monitoring: false,
+			servers: []taikuncore.ServerListDto{
+				buildServer(taikuncore.CLOUDROLE_KUBEMASTER, "master-1", "m4"),
+			},
+			flavors: []taikuncore.FlavorsListDto{
+				buildFlavor("m4", 4, 4),
+			},
+		},
+		{
+			name:       "monitoring enabled with qualifying worker passes",
+			monitoring: true,
+			servers: []taikuncore.ServerListDto{
+				buildServer(taikuncore.CLOUDROLE_KUBEMASTER, "master-1", "m4"),
+				buildServer(taikuncore.CLOUDROLE_KUBEWORKER, "worker-1", "w4"),
+			},
+			flavors: []taikuncore.FlavorsListDto{
+				buildFlavor("m4", 4, 4),
+				buildFlavor("w4", 4, 4),
+			},
+		},
+		{
+			name:       "monitoring enabled without qualifying worker fails",
+			monitoring: true,
+			servers: []taikuncore.ServerListDto{
+				buildServer(taikuncore.CLOUDROLE_KUBEMASTER, "master-1", "m4"),
+				buildServer(taikuncore.CLOUDROLE_KUBEWORKER, "worker-small", "w2"),
+			},
+			flavors: []taikuncore.FlavorsListDto{
+				buildFlavor("m4", 4, 4),
+				buildFlavor("w2", 2, 2),
+			},
+			wantErrContains: "at least one Kubeworker",
+		},
+		{
+			name:       "unknown flavor metadata returns clear error",
+			monitoring: true,
+			servers: []taikuncore.ServerListDto{
+				buildServer(taikuncore.CLOUDROLE_KUBEMASTER, "master-1", "m4"),
+				buildServer(taikuncore.CLOUDROLE_KUBEWORKER, "worker-unknown", "unknown"),
+			},
+			flavors: []taikuncore.FlavorsListDto{
+				buildFlavor("m4", 4, 4),
+			},
+			wantErrContains: "missing from cloud credential",
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			serversBody := mustMarshalJSONForDeploy(t, buildServersListForDetails(projectID, cloudID, testCase.monitoring, testCase.servers))
+			flavorsBody := mustMarshalJSONForDeploy(t, buildAllFlavorsList(testCase.flavors))
+
+			client, callCount, cleanup := newQueuedResponseClient(t, []queuedHTTPResponse{
+				{statusCode: http.StatusOK, body: serversBody},
+				{statusCode: http.StatusOK, body: flavorsBody},
+			})
+			defer cleanup()
+
+			errInfo := validateProjectSizingForCommit(client, projectID)
+
+			if testCase.wantErrContains == "" {
+				if errInfo != nil {
+					t.Fatalf("expected no validation error, got %q", errInfo.Message)
+				}
+			} else {
+				if errInfo == nil {
+					t.Fatalf("expected validation error containing %q, got nil", testCase.wantErrContains)
+				}
+				if !strings.Contains(errInfo.Message, testCase.wantErrContains) {
+					t.Fatalf("expected error containing %q, got %q", testCase.wantErrContains, errInfo.Message)
+				}
+			}
+
+			if *callCount != 2 {
+				t.Fatalf("expected two preflight calls, got %d", *callCount)
+			}
+		})
+	}
+}
+
+func TestCommitProjectWithFallbackFailsBeforeCommitWhenSizingValidationFails(t *testing.T) {
+	projectID := int32(501)
+	cloudID := int32(88)
+
+	serversBody := mustMarshalJSONForDeploy(t, buildServersListForDetails(projectID, cloudID, false, []taikuncore.ServerListDto{
+		buildServer(taikuncore.CLOUDROLE_KUBEMASTER, "master-small", "m2"),
+	}))
+	flavorsBody := mustMarshalJSONForDeploy(t, buildAllFlavorsList([]taikuncore.FlavorsListDto{
+		buildFlavor("m2", 2, 2),
+	}))
+
+	client, callCount, cleanup := newQueuedResponseClient(t, []queuedHTTPResponse{
+		{statusCode: http.StatusOK, body: serversBody},
+		{statusCode: http.StatusOK, body: flavorsBody},
+	})
+	defer cleanup()
+
+	_, errInfo := commitProjectWithFallback(client, projectID)
+	if errInfo == nil {
+		t.Fatal("expected commit preflight to fail for undersized Kubemaster")
+	}
+	if !strings.Contains(errInfo.Message, "every Kubemaster") {
+		t.Fatalf("expected Kubemaster sizing error, got %q", errInfo.Message)
+	}
+	if *callCount != 2 {
+		t.Fatalf("expected only preflight calls before failure, got %d", *callCount)
+	}
+}
+
+func TestCommitProjectWithFallbackSkipsSizingValidationForTrackedVMMode(t *testing.T) {
+	resetPendingProjectCommitChangesForTest(t)
+
+	projectID := int32(502)
+	recordPendingStandaloneVMCreate(projectID)
+
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if strings.Contains(r.URL.Path, "/servers/") {
+			t.Fatalf("unexpected sizing validation call in VM mode: %s", r.URL.Path)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	cfg := taikuncore.NewConfiguration()
+	cfg.Scheme = "http"
+	cfg.Host = strings.TrimPrefix(server.URL, "http://")
+	client := &taikungoclient.Client{
+		Client: taikuncore.NewAPIClient(cfg),
+	}
+
+	result, errInfo := commitProjectWithFallback(client, projectID)
+	if errInfo != nil {
+		t.Fatalf("expected VM-only commit to skip sizing validation, got error %+v", errInfo)
+	}
+	if result.Mode != "vm" {
+		t.Fatalf("expected vm commit mode, got %q", result.Mode)
+	}
+	if callCount != 1 {
+		t.Fatalf("expected only VM commit endpoint call, got %d calls", callCount)
 	}
 }
