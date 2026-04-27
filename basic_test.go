@@ -166,8 +166,27 @@ func TestArgumentStructs(t *testing.T) {
 			data: RefreshTaikunClientArgs{},
 		},
 		{
+			name: "ServerVersionArgs",
+			data: ServerVersionArgs{},
+		},
+		{
 			name: "RobotUserCapabilitiesArgs",
 			data: RobotUserCapabilitiesArgs{},
+		},
+		{
+			name: "MCPLockArgs",
+			data: MCPLockArgs{
+				OrganizationIDs: []int32{10, 20},
+				ProjectIDs:      []int32{100, 200},
+			},
+		},
+		{
+			name: "MCPLockStatusArgs",
+			data: MCPLockStatusArgs{},
+		},
+		{
+			name: "MCPLockClearArgs",
+			data: MCPLockClearArgs{},
 		},
 		{
 			name: "CreateVirtualClusterArgs",
@@ -176,6 +195,14 @@ func TestArgumentStructs(t *testing.T) {
 				Name:            "test-cluster",
 				WaitForCreation: true,
 				Timeout:         600,
+			},
+		},
+		{
+			name: "UpdateAppAutoSyncArgs",
+			data: UpdateAppAutoSyncArgs{
+				ProjectAppID: 123,
+				Mode:         "Minutes",
+				TTL:          60,
 			},
 		},
 		{
@@ -348,6 +375,10 @@ func TestArgumentStructs(t *testing.T) {
 			},
 		},
 		{
+			name: "KubernetesResourceKindsArgs",
+			data: KubernetesResourceKindsArgs{},
+		},
+		{
 			name: "ListKubernetesResourcesArgs",
 			data: ListKubernetesResourcesArgs{
 				ProjectID:  123,
@@ -439,6 +470,65 @@ func TestArgumentStructs(t *testing.T) {
 		{
 			name: "ProjectIDArgs",
 			data: ProjectIDArgs{
+				ProjectID: 123,
+			},
+		},
+		{
+			name: "ProjectMonitoringAlertsArgs",
+			data: ProjectMonitoringAlertsArgs{
+				ProjectID: 123,
+			},
+		},
+		{
+			name: "ProjectAlertsArgs",
+			data: ProjectAlertsArgs{
+				ProjectID: 123,
+				Mode:      "K8S",
+			},
+		},
+		{
+			name: "QueryProjectLokiLogsArgs",
+			data: QueryProjectLokiLogsArgs{
+				ProjectID:  123,
+				Parameters: `{app="nginx"}`,
+				Filters: []LokiLogFilterArgs{
+					{
+						Operator: "=",
+						Value:    "nginx",
+					},
+				},
+				StartDate: "2026-04-16T12:00:00Z",
+				EndDate:   "2026-04-16T13:00:00Z",
+				Limit:     100,
+				Direction: "backward",
+			},
+		},
+		{
+			name: "ExportProjectLokiLogsArgs",
+			data: ExportProjectLokiLogsArgs{
+				ProjectID:  123,
+				Parameters: `{app="nginx"}`,
+				Limit:      100,
+				Direction:  "forward",
+			},
+		},
+		{
+			name: "QueryProjectPrometheusMetricsArgs",
+			data: QueryProjectPrometheusMetricsArgs{
+				ProjectID:  123,
+				Parameters: `sum(rate(container_cpu_usage_seconds_total[5m]))`,
+				Start:      "2026-04-16T12:00:00Z",
+				End:        "2026-04-16T13:00:00Z",
+				Step:       "30s",
+				IsGraphEnabled: func() *bool {
+					v := true
+					return &v
+				}(),
+			},
+		},
+		{
+			name: "ProjectPrometheusMetricsAutocompleteArgs",
+			data: ProjectPrometheusMetricsAutocompleteArgs{
 				ProjectID: 123,
 			},
 		},

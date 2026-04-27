@@ -38,6 +38,7 @@ Thumbs.db
 
 # Project specific
 cloudera-cloud-factory-mcp
+taikun-mcp
 build/
 *.log
 
@@ -61,3 +62,4 @@ debug
 *.pprof
 *.kubeconfig
 *kubeconfig*
+ccf.code-workspace

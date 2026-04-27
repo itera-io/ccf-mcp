@@ -57,4 +57,7 @@ func TestDeleteKubernetesResourceInvalidKindReturnsJSONError(t *testing.T) {
 	if !strings.Contains(result.Error, "Invalid resource kind") {
 		t.Fatalf("expected JSON invalid-kind error, got %+v", result)
 	}
+	if !strings.Contains(result.Details, "Pod") || !strings.Contains(result.Details, "Deployment") {
+		t.Fatalf("expected allowed operation kinds in details, got %+v", result)
+	}
 }

@@ -107,6 +107,24 @@ set +a
 ./cloudera-cloud-factory-mcp
 ```
 
+### Optional MCP lock defaults
+
+You can pre-lock the MCP server to specific organization/project scopes at startup:
+
+```bash
+export MCP_LOCK_ORGANIZATION_IDS="12,34"
+export MCP_LOCK_PROJECT_IDS="1001,1002"
+```
+
+These defaults can also be set directly in your MCP client config (`mcp.json`) via `env` or startup `args`.
+
+Lock precedence and runtime behavior:
+
+- Startup-configured IDs (from `MCP_LOCK_ORGANIZATION_IDS`, `MCP_LOCK_PROJECT_IDS`, or `--mcp-lock-*` args) are treated as **hard limits**.
+- Runtime `mcp-lock` can only narrow scope within those hard limits.
+- If runtime `mcp-lock` includes IDs outside hard limits, the request is rejected.
+- If no hard limits and no runtime lock are set, MCP is unrestricted.
+
 ## Usage
 
 ### Start the server
@@ -140,10 +158,14 @@ Runtime logs are written to:
   "mcpServers": {
     "cloudera-cloud-factory": {
       "command": "/path/to/cloudera-cloud-factory-mcp",
+      "args": [
+        "--mcp-lock-project-ids=1001,1002"
+      ],
       "env": {
         "TAIKUN_ACCESS_KEY": "your-robot-user-access-key",
         "TAIKUN_SECRET_KEY": "your-robot-user-secret-key",
-        "TAIKUN_API_HOST": "api-latest.osc1.sjc.cloudera.com"
+        "TAIKUN_API_HOST": "api-latest.osc1.sjc.cloudera.com",
+        "MCP_LOCK_ORGANIZATION_IDS": "12,34"
       }
     }
   }
@@ -151,6 +173,25 @@ Runtime logs are written to:
 ```
 
 Any MCP client that can launch a stdio server can use the same binary and environment variables.
+
+### Claude Code — suppressing permission prompts
+
+By default, Claude Code asks for approval before running each MCP tool call. To allow tools from this server without prompting, add them to the `permissions.allow` list in `.claude/settings.local.json` at the root of your working directory.
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "mcp__cloudera-cloud-factory__.*"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "cloudera-cloud-factory"
+  ]
+}
+```
+
+The permission key format is `mcp__<server-name>__<tool-name>`. The value is matched as a regular expression, so `mcp__cloudera-cloud-factory__.*` allows all tools from this server at once.
 
 ## Tool coverage
 

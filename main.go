@@ -27,7 +27,10 @@ var (
 	taikunClient *taikungoclient.Client
 )
 
-const defaultAPIHost = "api-latest.osc1.sjc.cloudera.com"
+const (
+	defaultAPIHost = "api-latest.osc1.sjc.cloudera.com"
+	mcpServerName  = "cloudera-cloud-factory-mcp"
+)
 
 // Response structs for JSON formatting
 type ErrorResponse struct {
@@ -42,6 +45,8 @@ type SuccessResponse struct {
 
 type RefreshTaikunClientArgs struct{}
 
+type ServerVersionArgs struct{}
+
 type RefreshTaikunClientResponse struct {
 	Message             string   `json:"message"`
 	Success             bool     `json:"success"`
@@ -49,6 +54,16 @@ type RefreshTaikunClientResponse struct {
 	OrganizationName    string   `json:"organizationName,omitempty"`
 	Scopes              []string `json:"scopes,omitempty"`
 	ScopeDiscoveryError string   `json:"scopeDiscoveryError,omitempty"`
+}
+
+type ServerVersionResponse struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	Commit  string `json:"commit"`
+	Date    string `json:"date"`
+	BuiltBy string `json:"builtBy"`
+	Success bool   `json:"success"`
+	Message string `json:"message"`
 }
 
 type ProjectSummary struct {
@@ -494,6 +509,18 @@ func newRefreshTaikunClientResponse(robotCtx RobotUserContext) RefreshTaikunClie
 	}
 }
 
+func serverVersion() *mcp_golang.ToolResponse {
+	return createJSONResponse(ServerVersionResponse{
+		Name:    mcpServerName,
+		Version: version,
+		Commit:  commit,
+		Date:    date,
+		BuiltBy: builtBy,
+		Success: true,
+		Message: fmt.Sprintf("Loaded MCP server version information for %s", mcpServerName),
+	})
+}
+
 func main() {
 	// Handle version command
 	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
@@ -506,8 +533,15 @@ func main() {
 
 	initLogger()
 	logger.Printf("Starting Cloudera Cloud Factory MCP server v%s", version)
+	if err := initMCPLockFromConfig(os.Getenv, os.Args[1:]); err != nil {
+		logger.Fatalf("Failed to initialize MCP lock: %v", err)
+	}
 
-	server := mcp_golang.NewServer(stdio.NewStdioServerTransport())
+	server := mcp_golang.NewServer(
+		stdio.NewStdioServerTransport(),
+		mcp_golang.WithName(mcpServerName),
+		mcp_golang.WithVersion(version),
+	)
 	logger.Println("MCP server created")
 
 	// Initialize the Cloudera Cloud Factory client once
@@ -519,7 +553,15 @@ func main() {
 
 	// --- MCP Tool Registrations ---
 
-	err := registerScopedTool(server, "refresh-taikun-client", "Refresh the Cloudera Cloud Factory API client using current environment credentials", func(args RefreshTaikunClientArgs) (*mcp_golang.ToolResponse, error) {
+	err := registerScopedTool(server, "server-version", "Show MCP server version and build metadata", func(args ServerVersionArgs) (*mcp_golang.ToolResponse, error) {
+		return serverVersion(), nil
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register server-version tool: %v", err)
+	}
+	logger.Println("Registered server-version tool")
+
+	err = registerScopedTool(server, "refresh-taikun-client", "Refresh the Cloudera Cloud Factory API client using current environment credentials", func(args RefreshTaikunClientArgs) (*mcp_golang.ToolResponse, error) {
 		return refreshTaikunClient(), nil
 	})
 	if err != nil {
@@ -534,6 +576,30 @@ func main() {
 		logger.Fatalf("Failed to register robot-user-capabilities tool: %v", err)
 	}
 	logger.Println("Registered robot-user-capabilities tool")
+
+	err = registerScopedTool(server, "mcp-lock", "Set runtime MCP org/project scope lock allowlists", func(args MCPLockArgs) (*mcp_golang.ToolResponse, error) {
+		return mcpLock(args)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register mcp-lock tool: %v", err)
+	}
+	logger.Println("Registered mcp-lock tool")
+
+	err = registerScopedTool(server, "mcp-lock-status", "Show current MCP lock configuration and effective scope", func(args MCPLockStatusArgs) (*mcp_golang.ToolResponse, error) {
+		return mcpLockStatus(args)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register mcp-lock-status tool: %v", err)
+	}
+	logger.Println("Registered mcp-lock-status tool")
+
+	err = registerScopedTool(server, "mcp-lock-clear", "Clear runtime MCP lock and fall back to environment lock", func(args MCPLockClearArgs) (*mcp_golang.ToolResponse, error) {
+		return mcpLockClear(args)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register mcp-lock-clear tool: %v", err)
+	}
+	logger.Println("Registered mcp-lock-clear tool")
 
 	err = registerScopedTool(server, "create-virtual-cluster", "Create a new virtual cluster (a project in Cloudera Cloud Factory) with optional wait for completion", func(args CreateVirtualClusterArgs) (*mcp_golang.ToolResponse, error) {
 		return createVirtualCluster(taikunClient, args)
@@ -663,6 +729,14 @@ func main() {
 	}
 	logger.Println("Registered catalog-app-add tool")
 
+	err = registerScopedTool(server, "catalog-app-remove", "Remove an application from a catalog by package name and optional repository", func(args RemoveAppFromCatalogArgs) (*mcp_golang.ToolResponse, error) {
+		return removeAppFromCatalog(taikunClient, args)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register catalog-app-remove tool: %v", err)
+	}
+	logger.Println("Registered catalog-app-remove tool")
+
 	err = registerScopedTool(server, "catalog-apps-list", "List applications in a specific catalog or all catalogs", func(args ListCatalogAppsArgs) (*mcp_golang.ToolResponse, error) {
 		return listCatalogApps(taikunClient, args)
 	})
@@ -687,7 +761,7 @@ func main() {
 	}
 	logger.Println("Registered catalog-app-defaults-set tool")
 
-	err = registerScopedTool(server, "app-install", "Install a new application instance with optional defaults and overrides", func(args InstallAppArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "app-install", "Install a new application instance with optional defaults and overrides. If timeout is omitted, the install request defaults to 10 minutes; TTL defaults to 10 minutes; larger applications may need a higher timeout.", func(args InstallAppArgs) (*mcp_golang.ToolResponse, error) {
 		return installApp(taikunClient, args)
 	})
 	if err != nil {
@@ -710,6 +784,14 @@ func main() {
 		logger.Fatalf("Failed to register get-app tool: %v", err)
 	}
 	logger.Println("Registered get-app tool")
+
+	err = registerScopedTool(server, "update-app-autosync", "Update application autosync configuration", func(args UpdateAppAutoSyncArgs) (*mcp_golang.ToolResponse, error) {
+		return updateAppAutoSync(taikunClient, args)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register update-app-autosync tool: %v", err)
+	}
+	logger.Println("Registered update-app-autosync tool")
 
 	err = registerScopedTool(server, "update-sync-app", "Update application values and sync", func(args UpdateSyncAppArgs) (*mcp_golang.ToolResponse, error) {
 		return updateSyncApp(taikunClient, args)
@@ -799,7 +881,15 @@ func main() {
 	}
 	logger.Println("Registered list-kubeconfig-roles tool")
 
-	err = registerScopedTool(server, "list-kubernetes-resources", "List specialized Kubernetes resources in a project", func(args ListKubernetesResourcesArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "list-kubernetes-resource-kinds", "Show the supported Kubernetes resource kinds for list, describe, and delete operations. Kind matching is case-insensitive.", func(args KubernetesResourceKindsArgs) (*mcp_golang.ToolResponse, error) {
+		return listKubernetesResourceKinds(), nil
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register list-kubernetes-resource-kinds tool: %v", err)
+	}
+	logger.Println("Registered list-kubernetes-resource-kinds tool")
+
+	err = registerScopedTool(server, "list-kubernetes-resources", "List specialized Kubernetes resources in a project. Kind matching is case-insensitive; call list-kubernetes-resource-kinds to inspect supported listKinds and unavailableListKinds.", func(args ListKubernetesResourcesArgs) (*mcp_golang.ToolResponse, error) {
 		return listKubernetesResources(taikunClient, args)
 	})
 	if err != nil {
@@ -807,7 +897,7 @@ func main() {
 	}
 	logger.Println("Registered list-kubernetes-resources tool")
 
-	err = registerScopedTool(server, "describe-kubernetes-resource", "Describe a specialized Kubernetes resource in a project", func(args DescribeKubernetesResourceArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "describe-kubernetes-resource", "Describe a specialized Kubernetes resource in a project. Kind matching is case-insensitive; call list-kubernetes-resource-kinds to inspect supported operationKinds.", func(args DescribeKubernetesResourceArgs) (*mcp_golang.ToolResponse, error) {
 		return describeKubernetesResource(taikunClient, args)
 	})
 	if err != nil {
@@ -815,7 +905,7 @@ func main() {
 	}
 	logger.Println("Registered describe-kubernetes-resource tool")
 
-	err = registerScopedTool(server, "delete-kubernetes-resource", "Delete a Kubernetes resource", func(args DeleteKubernetesResourceArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "delete-kubernetes-resource", "Delete a Kubernetes resource. Kind matching is case-insensitive; call list-kubernetes-resource-kinds to inspect supported operationKinds.", func(args DeleteKubernetesResourceArgs) (*mcp_golang.ToolResponse, error) {
 		return deleteKubernetesResource(taikunClient, args)
 	})
 	if err != nil {
@@ -847,7 +937,7 @@ func main() {
 	}
 	logger.Println("Registered bind-flavors-to-project tool")
 
-	err = registerScopedTool(server, "add-server-to-project", "Add a server to a project. Recommendation: Bastion needs min flavor (2 CPUs, 2GB RAM), Master and Worker need at least 4 CPUs and 4GB RAM.", func(args AddServerArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "add-server-to-project", "Add a Kubernetes server to a project. Recommendation: Bastion can use 2 CPUs / 2GB RAM; Kubemaster must be at least 4 CPUs / 4GB RAM; if monitoring is enabled, include at least one Kubeworker with 4 CPUs / 4GB RAM before commit-project.", func(args AddServerArgs) (*mcp_golang.ToolResponse, error) {
 		return addServerToProject(taikunClient, args)
 	})
 	if err != nil {
@@ -855,7 +945,7 @@ func main() {
 	}
 	logger.Println("Registered add-server-to-project tool")
 
-	err = registerScopedTool(server, "commit-project", "Commit and provision pending project infrastructure in the cloud. For VM-only changes, this tool automatically falls back to the VM commit endpoint used by the UI when the cluster-style commit path is not applicable. Do not call while project status is Updating; full initial Kubernetes deploy often takes 10-30 minutes.", func(args CommitProjectArgs) (*mcp_golang.ToolResponse, error) {
+	err = registerScopedTool(server, "commit-project", "Commit and provision pending project infrastructure in the cloud. For Kubernetes changes, commit-project validates that all Kubemaster nodes are at least 4 CPUs / 4GB RAM and requires at least one Kubeworker at 4 CPUs / 4GB RAM when monitoring is enabled. For VM-only changes, this tool automatically falls back to the VM commit endpoint used by the UI when the cluster-style commit path is not applicable. Do not call while project status is Updating; full initial Kubernetes deploy often takes 10-30 minutes.", func(args CommitProjectArgs) (*mcp_golang.ToolResponse, error) {
 		return commitProject(taikunClient, args)
 	})
 	if err != nil {
@@ -1183,6 +1273,24 @@ func main() {
 	mustRegisterScopedTool(server, "disable-project-monitoring", "Disable monitoring for a project", func(args ProjectIDArgs) (*mcp_golang.ToolResponse, error) {
 		return disableProjectMonitoring(taikunClient, args)
 	})
+	mustRegisterScopedTool(server, "get-project-monitoring-alerts", "Read Prometheus-style monitoring alerts for a project. Monitoring must be enabled on the project first.", func(args ProjectMonitoringAlertsArgs) (*mcp_golang.ToolResponse, error) {
+		return getProjectMonitoringAlerts(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "list-project-alerts", "Read project detail alerts/messages for a project. Monitoring must be enabled on the project first.", func(args ProjectAlertsArgs) (*mcp_golang.ToolResponse, error) {
+		return listProjectAlerts(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "query-project-loki-logs", "Query Loki logs for a project. Monitoring must be enabled and results can be large.", func(args QueryProjectLokiLogsArgs) (*mcp_golang.ToolResponse, error) {
+		return queryProjectLokiLogs(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "export-project-loki-logs", "Export Loki logs for a project. Monitoring must be enabled; returns the API CSV export payload.", func(args ExportProjectLokiLogsArgs) (*mcp_golang.ToolResponse, error) {
+		return exportProjectLokiLogs(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "query-project-prometheus-metrics", "Query Prometheus metrics for a project. Monitoring must be enabled and the result payload may be large.", func(args QueryProjectPrometheusMetricsArgs) (*mcp_golang.ToolResponse, error) {
+		return queryProjectPrometheusMetrics(taikunClient, args)
+	})
+	mustRegisterScopedTool(server, "autocomplete-project-metrics", "Return Prometheus metric autocomplete suggestions for a project. Monitoring must be enabled.", func(args ProjectPrometheusMetricsAutocompleteArgs) (*mcp_golang.ToolResponse, error) {
+		return autocompleteProjectPrometheusMetrics(taikunClient, args)
+	})
 	mustRegisterScopedTool(server, "enable-project-ai-assistant", "Enable AI Assistant for a project using an AI credential", func(args ProjectAICredentialArgs) (*mcp_golang.ToolResponse, error) {
 		return enableProjectAIAssistant(taikunClient, args)
 	})
@@ -1252,7 +1360,7 @@ func main() {
 	mustRegisterScopedTool(server, "get-standalone-vm-details", "Get standalone VM details", func(args ProjectSearchListArgs) (*mcp_golang.ToolResponse, error) {
 		return getStandaloneVMDetails(taikunClient, args)
 	})
-	mustRegisterScopedTool(server, "create-standalone-vm", "Create a standalone VM (payload: CreateStandAloneVmCommand). You can batch multiple VM changes and then call commit-project once for the project; for VM-only projects, commit-project automatically falls back to the VM commit endpoint used by the UI when needed.", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
+	mustRegisterScopedTool(server, "create-standalone-vm", "Create a standalone VM (payload: CreateStandAloneVmCommand). The image field expects the provider image ID (for example an AWS AMI ID), not the display name. If payload omits volumeSize, the tool defaults it to 10 GiB; for Windows images, prefer 50 GiB. You can batch multiple VM changes and then call commit-project once for the project; for VM-only projects, commit-project automatically falls back to the VM commit endpoint used by the UI when needed.", func(args JSONPayloadArgs) (*mcp_golang.ToolResponse, error) {
 		return createStandaloneVM(taikunClient, args)
 	})
 	mustRegisterScopedTool(server, "delete-standalone-vm", "Queue deletion of a standalone VM from a project. You can batch this with other VM changes and then call commit-project once for the project to apply the deletion.", func(args DeleteStandaloneVMArgs) (*mcp_golang.ToolResponse, error) {

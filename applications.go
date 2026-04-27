@@ -14,6 +14,12 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+const (
+	defaultInstallAppTimeoutSeconds = 600
+	defaultInstallAppTTLMinutes     = 10
+	installAppTimeoutHint           = "Larger applications may need a longer install timeout; set timeout explicitly when installs routinely take more than 10 minutes."
+)
+
 type AppParameter struct {
 	Key   string `json:"key" jsonschema:"required,description=Parameter key"`
 	Value string `json:"value" jsonschema:"required,description=Parameter value"`
@@ -27,7 +33,8 @@ type InstallAppArgs struct {
 	ExtraValues               string         `json:"extraValues,omitempty" jsonschema:"description=Base64-encoded YAML extra values for the application (optional)"`
 	AutoSync                  bool           `json:"autoSync,omitempty" jsonschema:"description=Enable automatic synchronization (default: false)"`
 	TaikunLinkEnabled         bool           `json:"taikunLinkEnabled,omitempty" jsonschema:"description=Enable Cloudera Cloud Factory (Taikun) link integration (default: false)"`
-	Timeout                   int32          `json:"timeout,omitempty" jsonschema:"description=Installation timeout in seconds (optional)"`
+	Timeout                   int32          `json:"timeout,omitempty" jsonschema:"description=Installation timeout in minutes (optional). Larger applications may need a bigger timeout."`
+	TTL                       int32          `json:"ttl,omitempty" jsonschema:"description=Application TTL in minutes (default: 10, valid range: 10-200)"`
 	Parameters                []AppParameter `json:"parameters,omitempty" jsonschema:"description=Application parameters as key-value pairs (optional)"`
 	UseCatalogDefaults        *bool          `json:"useCatalogDefaults,omitempty" jsonschema:"description=Use catalog default parameters as a base (default: true)"`
 	WaitForReady              bool           `json:"waitForReady,omitempty" jsonschema:"description=Wait for application to be ready before returning (default: false)"`
@@ -50,7 +57,7 @@ type GetAppArgs struct {
 type UpdateSyncAppArgs struct {
 	ProjectAppID int32  `json:"projectAppId" jsonschema:"required,description=The project application ID to update/sync"`
 	ExtraValues  string `json:"extraValues,omitempty" jsonschema:"description=Base64-encoded YAML extra values (optional - if not provided, will only sync)"`
-	Timeout      int32  `json:"timeout,omitempty" jsonschema:"description=Operation timeout in seconds (optional)"`
+	Timeout      int32  `json:"timeout,omitempty" jsonschema:"description=Operation timeout in minutes (optional)"`
 	SyncOnly     bool   `json:"syncOnly,omitempty" jsonschema:"description=If true, only sync without updating values (default: false)"`
 }
 
@@ -182,8 +189,32 @@ func syncProjectApp(client *taikungoclient.Client, projectAppID int32, timeout i
 	return nil
 }
 
+func resolveInstallAppTimeout(timeout int32) (int32, bool) {
+	if timeout > 0 {
+		return timeout, false
+	}
+	return defaultInstallAppTimeoutSeconds, true
+}
+
+func resolveInstallAppTTL(ttl int32) (int32, bool, string) {
+	if ttl == 0 {
+		return defaultInstallAppTTLMinutes, true, ""
+	}
+	if ttl < 10 || ttl > 200 {
+		return 0, false, "ttl must be between 10 and 200 minutes"
+	}
+	return ttl, false, ""
+}
+
 func installApp(client *taikungoclient.Client, args InstallAppArgs) (*mcp_golang.ToolResponse, error) {
 	ctx := context.Background()
+	installTimeout, timeoutDefaulted := resolveInstallAppTimeout(args.Timeout)
+	installTTL, ttlDefaulted, ttlValidationError := resolveInstallAppTTL(args.TTL)
+	if ttlValidationError != "" {
+		return createJSONResponse(ErrorResponse{
+			Error: ttlValidationError,
+		}), nil
+	}
 
 	createCmd := taikuncore.NewCreateProjectAppCommand()
 	createCmd.SetName(args.Name)
@@ -192,13 +223,14 @@ func installApp(client *taikungoclient.Client, args InstallAppArgs) (*mcp_golang
 	createCmd.SetCatalogAppId(args.CatalogAppID)
 	createCmd.SetAutoSync(args.AutoSync)
 	createCmd.SetTaikunLinkEnabled(args.TaikunLinkEnabled)
+	createCmd.SetTimeout(installTimeout)
+	if createCmd.AdditionalProperties == nil {
+		createCmd.AdditionalProperties = map[string]interface{}{}
+	}
+	createCmd.AdditionalProperties["ttl"] = installTTL
 
 	if args.ExtraValues != "" {
 		createCmd.SetExtraValues(args.ExtraValues)
-	}
-
-	if args.Timeout > 0 {
-		createCmd.SetTimeout(args.Timeout)
 	}
 
 	useCatalogDefaults := true
@@ -356,6 +388,11 @@ func installApp(client *taikungoclient.Client, args InstallAppArgs) (*mcp_golang
 		Name               string         `json:"name"`
 		Namespace          string         `json:"namespace"`
 		Status             string         `json:"status"`
+		TimeoutSeconds     int32          `json:"timeoutSeconds"`
+		TimeoutDefaulted   bool           `json:"timeoutDefaulted"`
+		TTLMinutes         int32          `json:"ttlMinutes"`
+		TTLDefaulted       bool           `json:"ttlDefaulted"`
+		Hint               string         `json:"hint,omitempty"`
 		UseCatalogDefaults bool           `json:"useCatalogDefaults"`
 		ParametersApplied  []AppParameter `json:"parametersApplied,omitempty"`
 	}
@@ -382,12 +419,19 @@ func installApp(client *taikungoclient.Client, args InstallAppArgs) (*mcp_golang
 		Name:               args.Name,
 		Namespace:          args.Namespace,
 		Status:             "initiated",
+		TimeoutSeconds:     installTimeout,
+		TimeoutDefaulted:   timeoutDefaulted,
+		TTLMinutes:         installTTL,
+		TTLDefaulted:       ttlDefaulted,
 		UseCatalogDefaults: useCatalogDefaults,
 		ParametersApplied:  appliedParams,
 	}
 
 	if args.WaitForReady {
 		responseData.Status = "ready"
+	}
+	if timeoutDefaulted {
+		responseData.Hint = installAppTimeoutHint
 	}
 
 	return createJSONResponse(responseData), nil
@@ -556,6 +600,7 @@ func getApp(client *taikungoclient.Client, args GetAppArgs) (*mcp_golang.ToolRes
 		HelmResult        string         `json:"helmResult,omitempty"`
 		Logs              string         `json:"logs,omitempty"`
 		ReleaseNotes      string         `json:"releaseNotes,omitempty"`
+		TTL               int32          `json:"ttl"`
 	}
 
 	appDetail := AppDetails{
@@ -610,6 +655,8 @@ func getApp(client *taikungoclient.Client, args GetAppArgs) (*mcp_golang.ToolRes
 	if appDetails.GetReleaseNotes() != "" {
 		appDetail.ReleaseNotes = appDetails.GetReleaseNotes()
 	}
+
+	appDetail.TTL = appDetails.GetTtl()
 
 	return createJSONResponse(appDetail), nil
 }
@@ -778,4 +825,41 @@ func waitForApp(client *taikungoclient.Client, args WaitForAppArgs) (*mcp_golang
 		Message: message,
 		Success: true,
 	}), nil
+}
+
+type UpdateAppAutoSyncArgs struct {
+	ProjectAppID int32  `json:"projectAppId" jsonschema:"required,description=The project application ID to update autosync for"`
+	Mode         string `json:"mode,omitempty" jsonschema:"description=The TTL mode (e.g., 'Seconds', 'Minutes', 'Hours')"`
+	TTL          int32  `json:"ttl,omitempty" jsonschema:"description=The TTL value"`
+}
+
+func updateAppAutoSync(client *taikungoclient.Client, args UpdateAppAutoSyncArgs) (*mcp_golang.ToolResponse, error) {
+	ctx := context.Background()
+
+	cmd := taikuncore.NewAutoSyncManagementCommand()
+	cmd.SetId(args.ProjectAppID)
+	if args.Mode != "" {
+		cmd.SetMode(args.Mode)
+	}
+	if args.TTL > 0 {
+		cmd.SetTtl(args.TTL)
+	}
+
+	httpResponse, err := client.Client.ProjectAppsAPI.ProjectappAutosync(ctx).
+		AutoSyncManagementCommand(*cmd).
+		Execute()
+
+	if err != nil {
+		return createError(httpResponse, err), nil
+	}
+
+	if errorResp := checkResponse(httpResponse, "update application autosync"); errorResp != nil {
+		return errorResp, nil
+	}
+
+	successResp := SuccessResponse{
+		Message: fmt.Sprintf("Application ID %d autosync configuration updated successfully", args.ProjectAppID),
+		Success: true,
+	}
+	return createJSONResponse(successResp), nil
 }

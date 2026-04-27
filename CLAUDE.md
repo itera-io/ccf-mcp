@@ -83,7 +83,7 @@ When unsure about API response fields:
 - **Project Changes**: If you add servers to an already deployed project, you must run `commit-project` again to apply the changes.
 - **Standalone VMs**: Projects can host both Kubernetes resources and standalone VMs. After `create-standalone-vm` (or other standalone VM mutations such as disk or flavor changes), run `commit-project` for that project so changes are provisioned, unless your organization auto-commits. The MCP `commit-project` tool falls back to the VM-specific commit endpoint when the cluster-style commit path is not applicable.
 - **Project Status `Updating`**: Treat `Updating` as an ongoing commit or repair operation. Do not call `commit-project` again while a project is `Updating`; wait for it to settle into a terminal or steady state first.
-- **Sizing**: Minimal clusters (2 CPU / 2 GB RAM for bastion, master, and worker) should only be used for deployment tests and basic `kubectl` operations. For minimal workload clusters, use 2 CPU / 2 GB for bastion, 4 CPU / 4 GB for master, and 4 CPU / 8 GB for worker. Add workers or enable autoscaling based on workload.
+- **Sizing**: Treat Kubernetes control plane nodes (`Kubemaster`) as minimum 4 CPU / 4 GB RAM. When monitoring is enabled, ensure at least one `Kubeworker` is also at least 4 CPU / 4 GB RAM. This is validated by `commit-project`, which fails fast until these minimums are met. Bastion can use smaller sizing such as 2 CPU / 2 GB RAM for basic setups.
 - **Virtual Clusters**: Agents can create virtual clusters within projects to isolate workloads while saving resources; ideal for testing and fast iteration.
 
 ## Project Structure
