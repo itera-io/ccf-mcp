@@ -11,7 +11,7 @@ import (
 func resetMCPLockStateForTest() {
 	globalMCPLockState.mu.Lock()
 	defer globalMCPLockState.mu.Unlock()
-	globalMCPLockState.envScope = nil
+	globalMCPLockState.hardLimitScope = nil
 	globalMCPLockState.runtimeScope = nil
 }
 
@@ -113,7 +113,7 @@ func TestInitMCPLockFromConfigArgsOverrideEnv(t *testing.T) {
 	}
 }
 
-func TestMCPLockRuntimeOverridesEnvAndClearFallsBack(t *testing.T) {
+func TestMCPLockRuntimeMustBeSubsetOfHardLimitAndClearFallsBack(t *testing.T) {
 	resetMCPLockStateForTest()
 
 	if err := initMCPLockFromEnv(func(key string) string {
@@ -125,14 +125,23 @@ func TestMCPLockRuntimeOverridesEnvAndClearFallsBack(t *testing.T) {
 		t.Fatalf("init env lock: %v", err)
 	}
 
-	_, err := mcpLock(MCPLockArgs{ProjectIDs: []int32{222}})
+	resp, err := mcpLock(MCPLockArgs{ProjectIDs: []int32{222}})
 	if err != nil {
 		t.Fatalf("mcpLock returned error: %v", err)
 	}
+	rejected := parseResponseMap(t, resp)
+	if rejected["error"] == nil {
+		t.Fatalf("expected out-of-hard-limit runtime lock to be rejected, got %v", rejected)
+	}
+
+	_, err = mcpLock(MCPLockArgs{ProjectIDs: []int32{111}})
+	if err != nil {
+		t.Fatalf("mcpLock (subset) returned error: %v", err)
+	}
 
 	effective, _ := getEffectiveMCPLockScope()
-	if len(effective.ProjectIDs) != 1 || effective.ProjectIDs[0] != 222 {
-		t.Fatalf("expected runtime lock to override env lock, got %+v", effective.ProjectIDs)
+	if len(effective.ProjectIDs) != 1 || effective.ProjectIDs[0] != 111 {
+		t.Fatalf("expected effective project scope [111], got %+v", effective.ProjectIDs)
 	}
 
 	_, err = mcpLockClear(MCPLockClearArgs{})
@@ -185,9 +194,9 @@ func TestEnforceMCPLockAllowsInScopeProjectAndPayloadExtraction(t *testing.T) {
 func TestMCPLockStatusReturnsConsistentSnapshot(t *testing.T) {
 	resetMCPLockStateForTest()
 	globalMCPLockState.mu.Lock()
-	env := newMCPLockScope([]int32{1}, []int32{100}, "env")
-	runtime := newMCPLockScope([]int32{2}, []int32{200}, "runtime")
-	globalMCPLockState.envScope = &env
+	hardLimit := newMCPLockScope([]int32{1}, []int32{100}, "hardLimit")
+	runtime := newMCPLockScope([]int32{1}, []int32{100}, "runtime")
+	globalMCPLockState.hardLimitScope = &hardLimit
 	globalMCPLockState.runtimeScope = &runtime
 	globalMCPLockState.mu.Unlock()
 
@@ -197,16 +206,37 @@ func TestMCPLockStatusReturnsConsistentSnapshot(t *testing.T) {
 	}
 	decoded := parseResponseMap(t, resp)
 
-	runtimeLock, ok := decoded["runtimeLock"].(map[string]interface{})
-	if !ok || runtimeLock == nil {
-		t.Fatalf("expected runtimeLock map in status response, got %T", decoded["runtimeLock"])
+	hardLimitMap, ok := decoded["hardLimit"].(map[string]interface{})
+	if !ok || hardLimitMap == nil {
+		t.Fatalf("expected hardLimit map in status response, got %T", decoded["hardLimit"])
 	}
 	effective, ok := decoded["effective"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected effective map in status response, got %T", decoded["effective"])
 	}
-	if effective["source"] != "runtime" {
-		t.Fatalf("expected effective source runtime, got %v", effective["source"])
+	if effective["source"] != "hardLimit+runtime" {
+		t.Fatalf("expected effective source hardLimit+runtime, got %v", effective["source"])
+	}
+}
+
+func TestEffectiveScopeIntersectsHardLimitAndRuntime(t *testing.T) {
+	resetMCPLockStateForTest()
+	globalMCPLockState.mu.Lock()
+	hardLimit := newMCPLockScope([]int32{10, 20}, []int32{100, 200}, "hardLimit")
+	runtime := newMCPLockScope([]int32{20, 30}, []int32{200, 300}, "runtime")
+	globalMCPLockState.hardLimitScope = &hardLimit
+	globalMCPLockState.runtimeScope = &runtime
+	globalMCPLockState.mu.Unlock()
+
+	effective, active := getEffectiveMCPLockScope()
+	if !active {
+		t.Fatal("expected active effective scope")
+	}
+	if len(effective.OrganizationIDs) != 1 || effective.OrganizationIDs[0] != 20 {
+		t.Fatalf("expected org intersection [20], got %+v", effective.OrganizationIDs)
+	}
+	if len(effective.ProjectIDs) != 1 || effective.ProjectIDs[0] != 200 {
+		t.Fatalf("expected project intersection [200], got %+v", effective.ProjectIDs)
 	}
 }
 
@@ -251,5 +281,12 @@ func TestEnforceMCPLockOrgOnlyAllowsResolvedMatch(t *testing.T) {
 
 	if denied := enforceMCPLock("commit-project", ProjectIDArgs{ProjectID: 200}); denied != nil {
 		t.Fatalf("expected resolved matching organization to pass, got %+v", denied)
+	}
+}
+
+func TestEnforceMCPLockUnrestrictedWhenNoLocksConfigured(t *testing.T) {
+	resetMCPLockStateForTest()
+	if denied := enforceMCPLock("list-servers", ProjectIDArgs{ProjectID: 999}); denied != nil {
+		t.Fatalf("expected unrestricted call to pass when no locks configured, got %+v", denied)
 	}
 }

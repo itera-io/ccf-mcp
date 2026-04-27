@@ -118,6 +118,13 @@ export MCP_LOCK_PROJECT_IDS="1001,1002"
 
 These defaults can also be set directly in your MCP client config (`mcp.json`) via `env` or startup `args`.
 
+Lock precedence and runtime behavior:
+
+- Startup-configured IDs (from `MCP_LOCK_ORGANIZATION_IDS`, `MCP_LOCK_PROJECT_IDS`, or `--mcp-lock-*` args) are treated as **hard limits**.
+- Runtime `mcp-lock` can only narrow scope within those hard limits.
+- If runtime `mcp-lock` includes IDs outside hard limits, the request is rejected.
+- If no hard limits and no runtime lock are set, MCP is unrestricted.
+
 ## Usage
 
 ### Start the server

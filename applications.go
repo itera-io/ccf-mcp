@@ -325,9 +325,9 @@ func installApp(client *taikungoclient.Client, args InstallAppArgs) (*mcp_golang
 				ctx := context.Background()
 				details, detailsResponse, detailsErr := client.Client.ProjectAppsAPI.ProjectappDetails(ctx, projectAppID).Execute()
 				if detailsErr == nil && details != nil && string(details.GetStatus()) == "Failed" {
-						logger.Printf("Application '%s' (ID: %d) failed, attempting one sync retry", args.Name, projectAppID)
-						syncErr := syncProjectApp(client, projectAppID, waitTimeout)
-						if syncErr == nil {
+					logger.Printf("Application '%s' (ID: %d) failed, attempting one sync retry", args.Name, projectAppID)
+					syncErr := syncProjectApp(client, projectAppID, waitTimeout)
+					if syncErr == nil {
 						retryWaitErr := waitForAppReady(client, projectAppID, waitTimeout, false, args.ReadyStabilizationSeconds)
 						if retryWaitErr == nil {
 							resultMsg = fmt.Sprintf("Application '%s' (ID: %d) installed successfully after sync retry in namespace '%s'", args.Name, projectAppID, args.Namespace)

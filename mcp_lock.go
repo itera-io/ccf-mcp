@@ -39,9 +39,9 @@ type mcpLockScope struct {
 }
 
 type mcpLockState struct {
-	mu           sync.RWMutex
-	envScope     *mcpLockScope
-	runtimeScope *mcpLockScope
+	mu             sync.RWMutex
+	hardLimitScope *mcpLockScope
+	runtimeScope   *mcpLockScope
 }
 
 type mcpLockTargets struct {
@@ -90,14 +90,14 @@ func initMCPLockFromConfig(getenv func(string) string, startupArgs []string) err
 
 	if len(orgIDs) == 0 && len(projectIDs) == 0 {
 		globalMCPLockState.mu.Lock()
-		globalMCPLockState.envScope = nil
+		globalMCPLockState.hardLimitScope = nil
 		globalMCPLockState.mu.Unlock()
 		return nil
 	}
 
-	scope := newMCPLockScope(orgIDs, projectIDs, "env")
+	scope := newMCPLockScope(orgIDs, projectIDs, "hardLimit")
 	globalMCPLockState.mu.Lock()
-	globalMCPLockState.envScope = &scope
+	globalMCPLockState.hardLimitScope = &scope
 	globalMCPLockState.mu.Unlock()
 	if argOrgIDsRaw != "" || argProjectIDsRaw != "" {
 		logger.Printf("Initialized MCP lock from startup arguments (%d org IDs, %d project IDs)", len(scope.OrganizationIDs), len(scope.ProjectIDs))
@@ -113,6 +113,16 @@ func mcpLock(args MCPLockArgs) (*mcp_golang.ToolResponse, error) {
 			Error:   "mcp-lock requires at least one scope constraint",
 			Details: "Provide organizationIds and/or projectIds. Use mcp-lock-clear to remove runtime lock.",
 		}), nil
+	}
+
+	hardLimitScope, hasHardLimit := getHardLimitMCPLockScope()
+	if hasHardLimit {
+		if err := validateRuntimeMCPLockAgainstHardLimit(args, hardLimitScope); err != nil {
+			return createJSONResponse(ErrorResponse{
+				Error:   "mcp-lock rejected by hard limits",
+				Details: err.Error(),
+			}), nil
+		}
 	}
 
 	scope := newMCPLockScope(args.OrganizationIDs, args.ProjectIDs, "runtime")
@@ -133,7 +143,7 @@ func mcpLockStatus(args MCPLockStatusArgs) (*mcp_golang.ToolResponse, error) {
 		"success":     true,
 		"message":     "MCP lock status loaded",
 		"active":      snapshot.Active,
-		"envLock":     snapshot.EnvScope,
+		"hardLimit":   snapshot.HardLimitScope,
 		"runtimeLock": snapshot.RuntimeScope,
 		"effective":   snapshot.Effective,
 	}), nil
@@ -145,9 +155,11 @@ func mcpLockClear(args MCPLockClearArgs) (*mcp_golang.ToolResponse, error) {
 	globalMCPLockState.mu.Unlock()
 
 	effective, active := getEffectiveMCPLockScope()
-	message := "Runtime MCP lock cleared; no active lock remains"
+	message := "Runtime MCP lock cleared; no active MCP lock remains"
 	if active {
-		message = "Runtime MCP lock cleared; environment lock remains active"
+		if _, hasHardLimit := getHardLimitMCPLockScope(); hasHardLimit {
+			message = "Runtime MCP lock cleared; hard limits remain active"
+		}
 	}
 
 	return createJSONResponse(map[string]interface{}{
@@ -355,21 +367,50 @@ func newMCPLockScope(orgIDs []int32, projectIDs []int32, source string) mcpLockS
 func getEffectiveMCPLockScope() (mcpLockScope, bool) {
 	globalMCPLockState.mu.RLock()
 	defer globalMCPLockState.mu.RUnlock()
+	return getEffectiveMCPLockScopeLocked()
+}
 
+func getEffectiveMCPLockScopeLocked() (mcpLockScope, bool) {
+	var hardLimitOrgIDs, hardLimitProjectIDs []int32
+	var runtimeOrgIDs, runtimeProjectIDs []int32
+	var source string
+	var updatedAt string
+
+	if globalMCPLockState.hardLimitScope != nil {
+		hardLimitOrgIDs = globalMCPLockState.hardLimitScope.OrganizationIDs
+		hardLimitProjectIDs = globalMCPLockState.hardLimitScope.ProjectIDs
+		source = globalMCPLockState.hardLimitScope.Source
+		updatedAt = globalMCPLockState.hardLimitScope.UpdatedAt
+	}
 	if globalMCPLockState.runtimeScope != nil {
-		return *globalMCPLockState.runtimeScope, true
+		runtimeOrgIDs = globalMCPLockState.runtimeScope.OrganizationIDs
+		runtimeProjectIDs = globalMCPLockState.runtimeScope.ProjectIDs
+		if source != "" {
+			source = "hardLimit+runtime"
+		} else {
+			source = globalMCPLockState.runtimeScope.Source
+		}
+		updatedAt = globalMCPLockState.runtimeScope.UpdatedAt
 	}
-	if globalMCPLockState.envScope != nil {
-		return *globalMCPLockState.envScope, true
+
+	effective := mcpLockScope{
+		OrganizationIDs: effectiveMCPLockDimension(hardLimitOrgIDs, runtimeOrgIDs),
+		ProjectIDs:      effectiveMCPLockDimension(hardLimitProjectIDs, runtimeProjectIDs),
+		Source:          source,
+		UpdatedAt:       updatedAt,
 	}
-	return mcpLockScope{}, false
+
+	if len(effective.OrganizationIDs) == 0 && len(effective.ProjectIDs) == 0 {
+		return mcpLockScope{}, false
+	}
+	return effective, true
 }
 
 type mcpLockSnapshot struct {
-	EnvScope    *mcpLockScope `json:"envLock,omitempty"`
-	RuntimeScope *mcpLockScope `json:"runtimeLock,omitempty"`
-	Effective   mcpLockScope  `json:"effective"`
-	Active      bool          `json:"active"`
+	HardLimitScope *mcpLockScope `json:"hardLimit,omitempty"`
+	RuntimeScope   *mcpLockScope `json:"runtimeLock,omitempty"`
+	Effective      mcpLockScope  `json:"effective"`
+	Active         bool          `json:"active"`
 }
 
 func getMCPLockSnapshot() mcpLockSnapshot {
@@ -377,29 +418,81 @@ func getMCPLockSnapshot() mcpLockSnapshot {
 	defer globalMCPLockState.mu.RUnlock()
 
 	snapshot := mcpLockSnapshot{
-		EnvScope:     cloneMCPLockScope(globalMCPLockState.envScope),
-		RuntimeScope: cloneMCPLockScope(globalMCPLockState.runtimeScope),
+		HardLimitScope: cloneMCPLockScope(globalMCPLockState.hardLimitScope),
+		RuntimeScope:   cloneMCPLockScope(globalMCPLockState.runtimeScope),
 	}
-
-	if globalMCPLockState.runtimeScope != nil {
-		snapshot.Effective = *cloneMCPLockScope(globalMCPLockState.runtimeScope)
-		snapshot.Active = true
-		return snapshot
-	}
-	if globalMCPLockState.envScope != nil {
-		snapshot.Effective = *cloneMCPLockScope(globalMCPLockState.envScope)
-		snapshot.Active = true
-		return snapshot
-	}
-
-	snapshot.Effective = mcpLockScope{}
-	snapshot.Active = false
+	snapshot.Effective, snapshot.Active = getEffectiveMCPLockScopeLocked()
 	return snapshot
+}
+
+func getHardLimitMCPLockScope() (mcpLockScope, bool) {
+	globalMCPLockState.mu.RLock()
+	defer globalMCPLockState.mu.RUnlock()
+	if globalMCPLockState.hardLimitScope == nil {
+		return mcpLockScope{}, false
+	}
+	return *cloneMCPLockScope(globalMCPLockState.hardLimitScope), true
+}
+
+func effectiveMCPLockDimension(hardLimitIDs []int32, runtimeIDs []int32) []int32 {
+	hard := normalizeMCPLockIDs(hardLimitIDs)
+	runtime := normalizeMCPLockIDs(runtimeIDs)
+
+	if len(hard) == 0 {
+		return runtime
+	}
+	if len(runtime) == 0 {
+		return hard
+	}
+
+	hardSet := toMCPLockSet(hard)
+	intersection := make([]int32, 0, len(runtime))
+	for _, id := range runtime {
+		if _, ok := hardSet[id]; ok {
+			intersection = append(intersection, id)
+		}
+	}
+	return normalizeMCPLockIDs(intersection)
+}
+
+func validateRuntimeMCPLockAgainstHardLimit(args MCPLockArgs, hardLimitScope mcpLockScope) error {
+	var violations []string
+
+	if len(hardLimitScope.OrganizationIDs) > 0 && len(args.OrganizationIDs) > 0 {
+		allowed := toMCPLockSet(hardLimitScope.OrganizationIDs)
+		var outside []int32
+		for _, id := range normalizeMCPLockIDs(args.OrganizationIDs) {
+			if _, ok := allowed[id]; !ok {
+				outside = append(outside, id)
+			}
+		}
+		if len(outside) > 0 {
+			violations = append(violations, fmt.Sprintf("organizationIds %v are outside hard limits %v", outside, hardLimitScope.OrganizationIDs))
+		}
+	}
+
+	if len(hardLimitScope.ProjectIDs) > 0 && len(args.ProjectIDs) > 0 {
+		allowed := toMCPLockSet(hardLimitScope.ProjectIDs)
+		var outside []int32
+		for _, id := range normalizeMCPLockIDs(args.ProjectIDs) {
+			if _, ok := allowed[id]; !ok {
+				outside = append(outside, id)
+			}
+		}
+		if len(outside) > 0 {
+			violations = append(violations, fmt.Sprintf("projectIds %v are outside hard limits %v", outside, hardLimitScope.ProjectIDs))
+		}
+	}
+
+	if len(violations) > 0 {
+		return fmt.Errorf("%s", strings.Join(violations, "; "))
+	}
+	return nil
 }
 
 func resolveMCPLockOrganizationIDsFromProjects(projectIDs []int32) ([]int32, error) {
 	if taikunClient == nil || taikunClient.Client == nil {
-		return nil, fmt.Errorf("Cloudera Cloud Factory client is not initialized")
+		return nil, fmt.Errorf("cloudera cloud factory client is not initialized")
 	}
 
 	resolved := make([]int32, 0, len(projectIDs))
