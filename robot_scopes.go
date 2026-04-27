@@ -58,6 +58,9 @@ var toolRequiredScopes = map[string][]string{
 	"server-version":                 {},
 	"refresh-taikun-client":          {},
 	"robot-user-capabilities":        {},
+	"mcp-lock":                       {},
+	"mcp-lock-status":                {},
+	"mcp-lock-clear":                 {},
 	"create-virtual-cluster":         {"scope:virtual-clusters:write"},
 	"delete-virtual-cluster":         {"scope:virtual-clusters:write"},
 	"list-virtual-clusters":          {"scope:virtual-clusters:read"},
@@ -548,6 +551,9 @@ func registerScopedTool[T any](server *mcp_golang.Server, name, description stri
 
 	return server.RegisterTool(name, description, func(args T) (*mcp_golang.ToolResponse, error) {
 		if denied := authorizeTool(name); denied != nil {
+			return denied, nil
+		}
+		if denied := enforceMCPLock(name, args); denied != nil {
 			return denied, nil
 		}
 		return handler(args)

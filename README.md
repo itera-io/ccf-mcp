@@ -107,6 +107,17 @@ set +a
 ./cloudera-cloud-factory-mcp
 ```
 
+### Optional MCP lock defaults
+
+You can pre-lock the MCP server to specific organization/project scopes at startup:
+
+```bash
+export MCP_LOCK_ORGANIZATION_IDS="12,34"
+export MCP_LOCK_PROJECT_IDS="1001,1002"
+```
+
+These defaults can also be set directly in your MCP client config (`mcp.json`) via `env` or startup `args`.
+
 ## Usage
 
 ### Start the server
@@ -140,10 +151,14 @@ Runtime logs are written to:
   "mcpServers": {
     "cloudera-cloud-factory": {
       "command": "/path/to/cloudera-cloud-factory-mcp",
+      "args": [
+        "--mcp-lock-project-ids=1001,1002"
+      ],
       "env": {
         "TAIKUN_ACCESS_KEY": "your-robot-user-access-key",
         "TAIKUN_SECRET_KEY": "your-robot-user-secret-key",
-        "TAIKUN_API_HOST": "api-latest.osc1.sjc.cloudera.com"
+        "TAIKUN_API_HOST": "api-latest.osc1.sjc.cloudera.com",
+        "MCP_LOCK_ORGANIZATION_IDS": "12,34"
       }
     }
   }

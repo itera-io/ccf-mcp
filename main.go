@@ -533,6 +533,9 @@ func main() {
 
 	initLogger()
 	logger.Printf("Starting Cloudera Cloud Factory MCP server v%s", version)
+	if err := initMCPLockFromConfig(os.Getenv, os.Args[1:]); err != nil {
+		logger.Fatalf("Failed to initialize MCP lock: %v", err)
+	}
 
 	server := mcp_golang.NewServer(
 		stdio.NewStdioServerTransport(),
@@ -573,6 +576,30 @@ func main() {
 		logger.Fatalf("Failed to register robot-user-capabilities tool: %v", err)
 	}
 	logger.Println("Registered robot-user-capabilities tool")
+
+	err = registerScopedTool(server, "mcp-lock", "Set runtime MCP org/project scope lock allowlists", func(args MCPLockArgs) (*mcp_golang.ToolResponse, error) {
+		return mcpLock(args)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register mcp-lock tool: %v", err)
+	}
+	logger.Println("Registered mcp-lock tool")
+
+	err = registerScopedTool(server, "mcp-lock-status", "Show current MCP lock configuration and effective scope", func(args MCPLockStatusArgs) (*mcp_golang.ToolResponse, error) {
+		return mcpLockStatus(args)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register mcp-lock-status tool: %v", err)
+	}
+	logger.Println("Registered mcp-lock-status tool")
+
+	err = registerScopedTool(server, "mcp-lock-clear", "Clear runtime MCP lock and fall back to environment lock", func(args MCPLockClearArgs) (*mcp_golang.ToolResponse, error) {
+		return mcpLockClear(args)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to register mcp-lock-clear tool: %v", err)
+	}
+	logger.Println("Registered mcp-lock-clear tool")
 
 	err = registerScopedTool(server, "create-virtual-cluster", "Create a new virtual cluster (a project in Cloudera Cloud Factory) with optional wait for completion", func(args CreateVirtualClusterArgs) (*mcp_golang.ToolResponse, error) {
 		return createVirtualCluster(taikunClient, args)

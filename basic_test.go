@@ -174,6 +174,21 @@ func TestArgumentStructs(t *testing.T) {
 			data: RobotUserCapabilitiesArgs{},
 		},
 		{
+			name: "MCPLockArgs",
+			data: MCPLockArgs{
+				OrganizationIDs: []int32{10, 20},
+				ProjectIDs:      []int32{100, 200},
+			},
+		},
+		{
+			name: "MCPLockStatusArgs",
+			data: MCPLockStatusArgs{},
+		},
+		{
+			name: "MCPLockClearArgs",
+			data: MCPLockClearArgs{},
+		},
+		{
 			name: "CreateVirtualClusterArgs",
 			data: CreateVirtualClusterArgs{
 				ProjectID:       123,
