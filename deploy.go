@@ -40,12 +40,34 @@ const (
 	minBastionCPU             int32   = 2
 	minBastionRAM             float64 = 2
 	defaultClusterWaitTimeout         = 1800
+	// defaultCreateClusterDiskGB is used when diskSizeGb is omitted so cloud APIs
+	// receive an explicit root volume size (some providers reject unset / too-small disks).
+	defaultCreateClusterDiskGB int64 = 50
 )
 
 type clusterFlavorSelection struct {
 	Bastion string `json:"bastion"`
 	Master  string `json:"master"`
 	Worker  string `json:"worker"`
+}
+
+// distinctCreateClusterFlavorNames returns unique flavor names in bastion, master, worker order.
+func distinctCreateClusterFlavorNames(sel clusterFlavorSelection) []string {
+	order := []string{sel.Bastion, sel.Master, sel.Worker}
+	seen := make(map[string]struct{}, len(order))
+	var out []string
+	for _, name := range order {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
 }
 
 func getProjectServerAddLock(projectId int32) *sync.Mutex {
@@ -347,6 +369,28 @@ func createCluster(client *taikungoclient.Client, args CreateClusterArgs) (*mcp_
 		return createClusterFailureResponse(projectID, "flavor-selection", flavorError), nil
 	}
 
+	flavorNames := distinctCreateClusterFlavorNames(flavors)
+	if len(flavorNames) > 0 {
+		bindResp, bindErr := bindFlavorsToProject(client, BindFlavorsArgs{
+			ProjectId: projectID,
+			Flavors:   flavorNames,
+		})
+		if bindErr != nil {
+			return createClusterFailureResponse(projectID, "bind-flavors", createJSONResponse(ErrorResponse{
+				Error:   "Failed to bind flavors to project",
+				Details: bindErr.Error(),
+			})), nil
+		}
+		if !isToolResponseSuccess(bindResp) {
+			return createClusterFailureResponse(projectID, "bind-flavors", bindResp), nil
+		}
+	}
+
+	diskGB := args.DiskSizeGB
+	if diskGB <= 0 {
+		diskGB = defaultCreateClusterDiskGB
+	}
+
 	verifyTimeout := args.VerifyTimeout
 	if verifyTimeout <= 0 {
 		verifyTimeout = 300
@@ -359,7 +403,7 @@ func createCluster(client *taikungoclient.Client, args CreateClusterArgs) (*mcp_
 			Name:                 fmt.Sprintf("%s-bastion", clusterName),
 			Role:                 "Bastion",
 			Flavor:               flavors.Bastion,
-			DiskSize:             args.DiskSizeGB,
+			DiskSize:             diskGB,
 			Count:                bastionCount,
 			VerifyTimeoutSeconds: verifyTimeout,
 		},
@@ -368,7 +412,7 @@ func createCluster(client *taikungoclient.Client, args CreateClusterArgs) (*mcp_
 			Name:                 fmt.Sprintf("%s-master", clusterName),
 			Role:                 "Kubemaster",
 			Flavor:               flavors.Master,
-			DiskSize:             args.DiskSizeGB,
+			DiskSize:             diskGB,
 			Count:                masterCount,
 			VerifyTimeoutSeconds: verifyTimeout,
 		},
@@ -377,7 +421,7 @@ func createCluster(client *taikungoclient.Client, args CreateClusterArgs) (*mcp_
 			Name:                 fmt.Sprintf("%s-worker", clusterName),
 			Role:                 "Kubeworker",
 			Flavor:               flavors.Worker,
-			DiskSize:             args.DiskSizeGB,
+			DiskSize:             diskGB,
 			Count:                workerCount,
 			VerifyTimeoutSeconds: verifyTimeout,
 		},

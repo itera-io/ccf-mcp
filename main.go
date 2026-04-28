@@ -255,7 +255,7 @@ type CreateClusterArgs struct {
 	BastionFlavor       string `json:"bastionFlavor,omitempty" jsonschema:"description=Flavor override for bastion nodes (optional)"`
 	MasterFlavor        string `json:"masterFlavor,omitempty" jsonschema:"description=Flavor override for master nodes (optional)"`
 	WorkerFlavor        string `json:"workerFlavor,omitempty" jsonschema:"description=Flavor override for worker nodes (optional)"`
-	DiskSizeGB          int64  `json:"diskSizeGb,omitempty" jsonschema:"description=Optional disk size in GB for all nodes"`
+	DiskSizeGB          int64  `json:"diskSizeGb,omitempty" jsonschema:"description=Root disk size in GB for all nodes (default 50 when omitted; some clouds require an explicit minimum)"`
 	VerifyTimeout       int32  `json:"verifyTimeout,omitempty" jsonschema:"description=Seconds to wait when verifying node creation (default: 300)"`
 	WaitForCreation     *bool  `json:"waitForCreation,omitempty" jsonschema:"description=Wait for project readiness after commit (default: true)"`
 	Timeout             int32  `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds used by wait-for-project when waitForCreation=true (default: 1800)"`

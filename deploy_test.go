@@ -607,6 +607,7 @@ func TestCreateClusterOrchestratesProjectNodesAndCommit(t *testing.T) {
 	client, callCount, cleanup := newQueuedResponseClient(t, []queuedHTTPResponse{
 		{statusCode: http.StatusOK, body: `{"id":"9001"}`}, // create-project
 		{statusCode: http.StatusOK, body: flavorsBody},     // select flavors
+		{statusCode: http.StatusOK, body: `{}`},            // bind flavors to project
 		{statusCode: http.StatusOK, body: `{}`},            // add bastion
 		{statusCode: http.StatusOK, body: serversBody},     // verify bastion
 		{statusCode: http.StatusOK, body: `{}`},            // add master
@@ -644,8 +645,8 @@ func TestCreateClusterOrchestratesProjectNodesAndCommit(t *testing.T) {
 	if payload["projectId"] == nil {
 		t.Fatalf("expected projectId in response, got %+v", payload)
 	}
-	if *callCount != 11 {
-		t.Fatalf("expected 11 API calls, got %d", *callCount)
+	if *callCount != 12 {
+		t.Fatalf("expected 12 API calls, got %d", *callCount)
 	}
 }
 
